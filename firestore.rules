@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // "users" コレクション内のドキュメントに対するルール
+    match /users/{userId} {
+      
+      // -----------------------------------------------------
+      // ヘルパー関数
+      // -----------------------------------------------------
+      function isOwner() {
+        return request.auth != null && request.auth.uid == userId;
+      }
+      
+      function isFieldUnchanged(field) {
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny([field]);
+      }
+
+      // -----------------------------------------------------
+      // CRUDごとのアクセス制御
+      // -----------------------------------------------------
+      
+      // 【読み取り】本人のみ可能
+      allow read: if isOwner();
+
+      // 【作成】本人のみ可能
+      allow create: if isOwner()
+                    && (!('isStudentVerified' in request.resource.data) || request.resource.data.isStudentVerified == false)
+                    && (!('verifiedAt' in request.resource.data));
+
+      // 【更新】本人のみ可能
+      allow update: if isOwner()
+                    && isFieldUnchanged('isStudentVerified')
+                    && isFieldUnchanged('verifiedAt');
+                    
+      // 【削除】本人のみ可能
+      allow delete: if isOwner();
+    }
+
+    // -----------------------------------------------------
+    // その他のコレクションへのアクセスは一切禁止（ロック）
+    // -----------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
