@@ -38,6 +38,14 @@ dependencies:
   firebase_auth: ^6.1.4
   cloud_firestore: ^6.1.2
   provider: ^6.1.5+1
+  url_launcher: ^6.3.2
+  cloud_functions: ^6.0.6
+  firebase_storage: ^13.0.6
+  image_picker: ^1.2.1
+  image_cropper: ^11.0.0
+  cached_network_image: ^3.4.1
+  uuid: ^4.5.3
+  add_2_calendar: ^3.0.1
 
 dev_dependencies:
   flutter_test:

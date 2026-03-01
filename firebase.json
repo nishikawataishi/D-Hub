@@ -2,6 +2,18 @@
     "firestore": {
         "rules": "firestore.rules"
     },
+    "storage": {
+        "rules": "storage.rules"
+    },
+    "functions": {
+        "source": "functions",
+        "ignore": [
+            "node_modules",
+            ".git",
+            "firebase-debug.log",
+            "firebase-debug.*.log"
+        ]
+    },
     "hosting": {
         "public": "build/web",
         "ignore": [
@@ -15,6 +27,15 @@
                 "destination": "/index.html"
             }
         ]
+    },
+    "emulators": {
+        "functions": {
+            "port": 5001
+        },
+        "ui": {
+            "enabled": true
+        },
+        "singleProjectMode": true
     },
     "flutter": {
         "platforms": {

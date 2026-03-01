@@ -19,6 +19,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isPasswordVisible = false;
   bool _isLoading = false;
   bool _isSignUpMode = false;
+  bool _isOrganizationMode = false; // 団体アカウント登録フラグ
 
   /// メールアドレスのバリデーション（一般メール対応）
   String? _validateEmail(String? value) {
@@ -53,7 +54,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
     AuthResult result;
     if (_isSignUpMode) {
-      result = await _authService.signUp(email: email, password: password);
+      result = await _authService.signUp(
+        email: email,
+        password: password,
+        isOrganization: _isOrganizationMode,
+      );
     } else {
       result = await _authService.signIn(email: email, password: password);
     }
@@ -62,19 +67,17 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
 
     if (result.isSuccess) {
-      // 学生認証済みかチェックして遷移先を決める
-      final isVerified = await _authService.isStudentVerified();
-      if (!mounted) return;
-
-      if (isVerified) {
-        // 学生認証済み → メイン画面
-        Navigator.pushNamedAndRemoveUntil(context, '/main', (route) => false);
-      } else {
-        // 学生未認証 → 学生認証画面
-        if (_isSignUpMode) {
+      // 成功時、手動での画面遷移は行わない。
+      // Firebase Authのストリームを監視している main.dart の AuthGate に遷移を任せる。
+      if (_isSignUpMode) {
+        // 新規作成時のみ案内メッセージを表示
+        if (_isOrganizationMode) {
+          _showMessage('団体アカウントを作成しました。', isError: false);
+        } else {
           _showMessage('アカウントを作成しました。次に学生認証を行います。', isError: false);
         }
-        Navigator.pushNamedAndRemoveUntil(context, '/verify', (route) => false);
+      } else {
+        _showMessage('ログインしました', isError: false);
       }
     } else {
       _showMessage(result.message, isError: true);
@@ -237,6 +240,50 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                   ),
+
+                  // 団体アカウント登録のトグル（新規登録モード時のみ表示）
+                  if (_isSignUpMode) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: AppTheme.surface,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: _isOrganizationMode
+                              ? AppTheme.primary
+                              : Colors.grey.shade300,
+                          width: 1,
+                        ),
+                      ),
+                      child: SwitchListTile(
+                        title: const Text(
+                          '団体として登録する',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        subtitle: const Text(
+                          '※サークルや部活、ゼミなどの運営者の方',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                        value: _isOrganizationMode,
+                        onChanged: (bool value) {
+                          setState(() {
+                            _isOrganizationMode = value;
+                          });
+                        },
+                        activeColor: AppTheme.primary,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 4,
+                        ),
+                      ),
+                    ),
+                  ],
 
                   // パスワードリセット（ログインモード時のみ）
                   if (!_isSignUpMode)

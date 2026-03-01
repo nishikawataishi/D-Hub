@@ -17,7 +17,6 @@ class _StudentVerifyScreenState extends State<StudentVerifyScreen> {
   final _authService = AuthService();
   bool _isLoading = false;
   bool _isCodeSent = false;
-  String? _debugCode; // MVP: コードを画面に表示（本番では削除）
 
   /// 確認コードを送信
   Future<void> _sendCode() async {
@@ -36,9 +35,8 @@ class _StudentVerifyScreenState extends State<StudentVerifyScreen> {
     if (result.isSuccess) {
       setState(() {
         _isCodeSent = true;
-        _debugCode = result.verificationCode; // MVP表示用
       });
-      _showMessage('確認コードを生成しました', isError: false);
+      _showMessage(result.message, isError: false);
     } else {
       _showMessage(result.message, isError: true);
     }
@@ -228,54 +226,6 @@ class _StudentVerifyScreenState extends State<StudentVerifyScreen> {
               if (_isCodeSent) ...[
                 const SizedBox(height: 24),
 
-                // MVP: デバッグ用コード表示（本番では削除）
-                if (_debugCode != null)
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: Colors.orange.withValues(alpha: 0.3),
-                      ),
-                    ),
-                    child: Column(
-                      children: [
-                        const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.bug_report,
-                              size: 16,
-                              color: Colors.orange,
-                            ),
-                            SizedBox(width: 6),
-                            Text(
-                              'MVP開発用（本番では非表示）',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.orange,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _debugCode!,
-                          style: const TextStyle(
-                            fontSize: 32,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.orange,
-                            letterSpacing: 8,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                const SizedBox(height: 24),
-
                 // ステップ2: コード入力
                 _buildStepHeader(2, '確認コードを入力'),
                 const SizedBox(height: 12),
@@ -323,7 +273,6 @@ class _StudentVerifyScreenState extends State<StudentVerifyScreen> {
                         : () {
                             setState(() {
                               _isCodeSent = false;
-                              _debugCode = null;
                               _codeController.clear();
                             });
                           },

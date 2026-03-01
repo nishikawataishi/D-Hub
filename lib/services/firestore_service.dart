@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../data/mock_data.dart';
+import '../models/scout.dart';
 
 /// Firestoreのデータ操作を行うサービス
 class FirestoreService {
@@ -8,6 +9,21 @@ class FirestoreService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   // ─── 団体（Organizations） ───
+
+  /// 単一団体を取得
+  Future<Organization?> getOrganization(String id) async {
+    final doc = await _db.collection('organizations').doc(id).get();
+    if (!doc.exists) return null;
+    return Organization.fromJson(doc.data() as Map<String, dynamic>, doc.id);
+  }
+
+  /// 団体情報を保存
+  Future<void> saveOrganization(Organization org) async {
+    await _db
+        .collection('organizations')
+        .doc(org.id)
+        .set(org.toJson(), SetOptions(merge: true));
+  }
 
   /// 全団体を取得
   Stream<List<Organization>> getOrganizations() {
@@ -36,39 +52,25 @@ class FirestoreService {
 
   /// Firestoreドキュメント → Organizationモデル変換
   Organization _organizationFromDoc(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    return Organization(
-      id: doc.id,
-      name: data['name'] ?? '',
-      description: data['description'] ?? '',
-      category: OrgCategory.values.firstWhere(
-        (c) => c.name == data['category'],
-        orElse: () => OrgCategory.all,
-      ),
-      campus: Campus.values.firstWhere(
-        (c) => c.name == data['campus'],
-        orElse: () => Campus.both,
-      ),
-      logoEmoji: data['logoEmoji'] ?? '🏫',
-      instagramUrl: data['instagramUrl'] ?? 'https://www.instagram.com/',
-    );
+    if (!doc.exists || doc.data() == null) {
+      return Organization.empty(doc.id);
+    }
+    return Organization.fromJson(doc.data() as Map<String, dynamic>, doc.id);
   }
 
   // ─── スカウト（Scouts） ───
 
   /// 特定ユーザー宛のスカウトを取得
-  Stream<List<Map<String, dynamic>>> getScoutsForUser(String userId) {
+  Stream<List<Scout>> getScoutsForUser(String userId) {
     return _db
         .collection('scouts')
         .where('targetUserId', isEqualTo: userId)
         .orderBy('sentAt', descending: true)
         .snapshots()
         .map(
-          (snapshot) => snapshot.docs.map((doc) {
-            final data = doc.data();
-            data['id'] = doc.id;
-            return data;
-          }).toList(),
+          (snapshot) => snapshot.docs
+              .map((doc) => Scout.fromFirestore(doc.data(), doc.id))
+              .toList(),
         );
   }
 
@@ -80,10 +82,47 @@ class FirestoreService {
     });
   }
 
+  /// スカウトを送信する
+  Future<void> sendScout({
+    required String targetUserId,
+    required Organization senderOrg,
+    required String message,
+  }) async {
+    // 重複送信のチェック: 同じ学生に未読のスカウトが既にある場合はエラー
+    final existingScouts = await _db
+        .collection('scouts')
+        .where('targetUserId', isEqualTo: targetUserId)
+        .where('organizationId', isEqualTo: senderOrg.id)
+        .where('isRead', isEqualTo: false)
+        .get();
+
+    if (existingScouts.docs.isNotEmpty) {
+      throw Exception('すでにこの学生には未読のスカウトを送信済みです。');
+    }
+
+    final now = DateTime.now();
+    final scoutData = Scout(
+      id: '', // Firestoreが自動生成するため空でOKだが、toFirestoreでは保存されない
+      targetUserId: targetUserId,
+      organizationId: senderOrg.id,
+      organizationName: senderOrg.name,
+      organizationEmoji: senderOrg.logoEmoji,
+      organizationCategory: senderOrg.category.name,
+      message: message,
+      isRead: false,
+      sentAt: now,
+      organizationInstagramUrl: senderOrg.instagramUrl,
+    ).toFirestore();
+
+    scoutData['sentAt'] = FieldValue.serverTimestamp();
+
+    await _db.collection('scouts').add(scoutData);
+  }
+
   // ─── イベント（Events） ───
 
   /// 今後のイベントを取得
-  Stream<List<Map<String, dynamic>>> getUpcomingEvents() {
+  Stream<List<Event>> getUpcomingEvents() {
     return _db
         .collection('events')
         .where('startAt', isGreaterThan: Timestamp.now())
@@ -92,19 +131,77 @@ class FirestoreService {
         .map(
           (snapshot) => snapshot.docs.map((doc) {
             final data = doc.data();
-            data['id'] = doc.id;
-            return data;
+            return Event.fromFirestore(data, doc.id);
           }).toList(),
         );
+  }
+
+  /// 特定団体が作成したイベント一覧を取得
+  Stream<List<Event>> getEventsByOrganization(String orgId) {
+    return _db
+        .collection('events')
+        .where('organizationId', isEqualTo: orgId)
+        .orderBy('startAt', descending: false)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => Event.fromFirestore(doc.data(), doc.id))
+              .toList(),
+        );
+  }
+
+  /// イベントを作成
+  Future<void> createEvent(Event event) async {
+    final data = event.toFirestore();
+    data['createdAt'] = FieldValue.serverTimestamp();
+    await _db.collection('events').add(data);
+  }
+
+  /// イベントを更新
+  Future<void> updateEvent(Event event) async {
+    await _db.collection('events').doc(event.id).update(event.toFirestore());
+  }
+
+  /// イベントを削除
+  Future<void> deleteEvent(String eventId) async {
+    await _db.collection('events').doc(eventId).delete();
   }
 
   // ─── ユーザープロフィール ───
 
   /// ユーザープロフィールを取得
-  Future<Map<String, dynamic>?> getUserProfile(String userId) async {
+  Future<UserProfile?> getUserProfile(String userId) async {
     final doc = await _db.collection('users').doc(userId).get();
     if (!doc.exists) return null;
-    return doc.data();
+    return UserProfile.fromFirestore(
+      doc.data() as Map<String, dynamic>,
+      doc.id,
+    );
+  }
+
+  /// ユーザープロフィールのストリームを取得
+  Stream<UserProfile?> getUserProfileStream(String userId) {
+    return _db.collection('users').doc(userId).snapshots().map((doc) {
+      if (!doc.exists || doc.data() == null) return null;
+      return UserProfile.fromFirestore(
+        doc.data() as Map<String, dynamic>,
+        doc.id,
+      );
+    });
+  }
+
+  /// 学生一覧を取得（プロフィール設定済みのユーザーのみ）
+  Stream<List<UserProfile>> getStudents() {
+    return _db
+        .collection('users')
+        // 必要に応じて 'isStudent' フラグやプロフィール入力完了フラグでフィルタリング
+        .where('name', isNotEqualTo: null)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => UserProfile.fromFirestore(doc.data(), doc.id))
+              .toList(),
+        );
   }
 
   /// ユーザープロフィールを更新

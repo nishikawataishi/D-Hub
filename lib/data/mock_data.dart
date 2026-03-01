@@ -2,102 +2,17 @@
 /// バックエンド未接続のため、固定データでUIプロトタイプを動作させる
 library;
 
-/// 団体のカテゴリ（ジャンル）
-enum OrgCategory {
-  all('すべて'),
-  sports('スポーツ'),
-  culture('文化系'),
-  academic('学術・ゼミ'),
-  volunteer('ボランティア'),
-  music('音楽');
+import '../models/campus.dart';
+import '../models/user_profile.dart';
+import '../models/organization.dart';
+import '../models/event.dart';
 
-  final String label;
-  const OrgCategory(this.label);
-}
+import '../models/scout.dart';
 
-/// キャンパス
-enum Campus {
-  imadegawa('今出川'),
-  kyotanabe('京田辺'),
-  both('両キャンパス');
-
-  final String label;
-  const Campus(this.label);
-}
-
-/// 団体データモデル
-class Organization {
-  final String id;
-  final String name;
-  final String description;
-  final OrgCategory category;
-  final Campus campus;
-  final String logoEmoji; // モック用に絵文字で代用
-  final String instagramUrl;
-
-  const Organization({
-    required this.id,
-    required this.name,
-    required this.description,
-    required this.category,
-    required this.campus,
-    required this.logoEmoji,
-    this.instagramUrl = 'https://www.instagram.com/',
-  });
-}
-
-/// スカウトデータモデル
-class Scout {
-  final String id;
-  final Organization organization;
-  final String message;
-  final DateTime sentAt;
-  bool isRead;
-
-  Scout({
-    required this.id,
-    required this.organization,
-    required this.message,
-    required this.sentAt,
-    this.isRead = false,
-  });
-}
-
-/// イベントデータモデル
-class Event {
-  final String id;
-  final Organization organization;
-  final String title;
-  final String description;
-  final DateTime startAt;
-  final Campus campus;
-
-  const Event({
-    required this.id,
-    required this.organization,
-    required this.title,
-    required this.description,
-    required this.startAt,
-    required this.campus,
-  });
-}
-
-/// ユーザープロフィールデータモデル
-class UserProfile {
-  final String name;
-  final String faculty;
-  final int grade;
-  final Campus mainCampus;
-  List<String> interests;
-
-  UserProfile({
-    required this.name,
-    required this.faculty,
-    required this.grade,
-    required this.mainCampus,
-    required this.interests,
-  });
-}
+export '../models/campus.dart';
+export '../models/user_profile.dart';
+export '../models/organization.dart';
+export '../models/event.dart';
 
 // ============================
 // モックデータインスタンス
@@ -175,28 +90,44 @@ final List<Organization> mockOrganizations = [
 final List<Scout> mockScouts = [
   Scout(
     id: 's1',
-    organization: mockOrganizations[0],
+    targetUserId: 'mock_user_id',
+    organizationId: mockOrganizations[0].id,
+    organizationName: mockOrganizations[0].name,
+    organizationEmoji: mockOrganizations[0].logoEmoji,
+    organizationCategory: mockOrganizations[0].category.name,
     message: 'スポーツが好きなあなたにぜひ！一度見学に来ませんか？🏀',
     sentAt: DateTime.now().subtract(const Duration(hours: 1)),
     isRead: false,
   ),
   Scout(
     id: 's2',
-    organization: mockOrganizations[2],
+    targetUserId: 'mock_user_id',
+    organizationId: mockOrganizations[2].id,
+    organizationName: mockOrganizations[2].name,
+    organizationEmoji: mockOrganizations[2].logoEmoji,
+    organizationCategory: mockOrganizations[2].category.name,
     message: '商学部で国際経済に興味があるあなたへ。ゼミ説明会を開催します！',
     sentAt: DateTime.now().subtract(const Duration(hours: 5)),
     isRead: false,
   ),
   Scout(
     id: 's3',
-    organization: mockOrganizations[3],
+    targetUserId: 'mock_user_id',
+    organizationId: mockOrganizations[3].id,
+    organizationName: mockOrganizations[3].name,
+    organizationEmoji: mockOrganizations[3].logoEmoji,
+    organizationCategory: mockOrganizations[3].category.name,
     message: 'ダンス未経験でも大歓迎！新歓公演の観覧に来てください💃',
     sentAt: DateTime.now().subtract(const Duration(days: 1)),
     isRead: true,
   ),
   Scout(
     id: 's4',
-    organization: mockOrganizations[5],
+    targetUserId: 'mock_user_id',
+    organizationId: mockOrganizations[5].id,
+    organizationName: mockOrganizations[5].name,
+    organizationEmoji: mockOrganizations[5].logoEmoji,
+    organizationCategory: mockOrganizations[5].category.name,
     message: '歌うことが好きなら、アカペラの世界をのぞいてみませんか？🎵',
     sentAt: DateTime.now().subtract(const Duration(days: 2)),
     isRead: true,
@@ -249,6 +180,7 @@ final List<Event> mockEvents = [
 
 /// サンプルユーザープロフィール
 final UserProfile mockUser = UserProfile(
+  id: 'mock_user_id',
   name: '西川 大司',
   faculty: '商学部',
   grade: 3,

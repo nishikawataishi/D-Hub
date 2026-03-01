@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
-import '../data/mock_data.dart';
+
 import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
+import '../models/organization.dart';
+import '../models/campus.dart';
+import 'group_detail_screen.dart';
 
 /// ホーム画面
 /// 団体一覧を2列グリッドで表示。検索・ジャンルフィルタリング機能付き。
@@ -45,23 +48,6 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('D.scout'),
         actions: [
-          // 開発用: Firestoreにデータを投入するボタン
-          IconButton(
-            icon: const Icon(Icons.cloud_upload_outlined),
-            tooltip: 'データ投入（開発用）',
-            onPressed: () async {
-              final messenger = ScaffoldMessenger.of(context);
-              await _firestoreService.seedData();
-              if (mounted) {
-                messenger.showSnackBar(
-                  const SnackBar(
-                    content: Text('Firestoreにデータを投入しました！'),
-                    backgroundColor: AppTheme.primary,
-                  ),
-                );
-              }
-            },
-          ),
           IconButton(
             icon: const Icon(Icons.notifications_none_rounded),
             onPressed: () {},
@@ -138,11 +124,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: StreamBuilder<List<Organization>>(
               stream: _firestoreService.getOrganizations(),
               builder: (context, snapshot) {
-                // Firestoreから取得できた場合はそのデータを使用
-                // 取得できない場合はモックデータにフォールバック
-                final allOrgs = snapshot.hasData && snapshot.data!.isNotEmpty
-                    ? snapshot.data!
-                    : mockOrganizations;
+                final allOrgs = snapshot.data ?? [];
 
                 final filtered = _filterOrganizations(allOrgs);
 
@@ -208,117 +190,127 @@ class _OrganizationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // メイン画像エリア＋キャンパスバッジ
-          Stack(
-            children: [
-              Container(
-                height: 90,
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      _campusColor().withValues(alpha: 0.15),
-                      _campusColor().withValues(alpha: 0.05),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                ),
-                child: Center(
-                  child: Text(
-                    organization.logoEmoji,
-                    style: const TextStyle(fontSize: 36),
-                  ),
-                ),
-              ),
-              // キャンパスバッジ
-              Positioned(
-                top: 6,
-                left: 6,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
-                  ),
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => GroupDetailScreen(organization: organization),
+          ),
+        );
+      },
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // メイン画像エリア＋キャンパスバッジ
+            Stack(
+              children: [
+                Container(
+                  height: 90,
+                  width: double.infinity,
                   decoration: BoxDecoration(
-                    color: _campusColor(),
-                    borderRadius: BorderRadius.circular(10),
+                    gradient: LinearGradient(
+                      colors: [
+                        _campusColor().withValues(alpha: 0.15),
+                        _campusColor().withValues(alpha: 0.05),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
                   ),
-                  child: Text(
-                    organization.campus.label,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
+                  child: Center(
+                    child: Text(
+                      organization.logoEmoji,
+                      style: const TextStyle(fontSize: 36),
                     ),
                   ),
                 ),
-              ),
-            ],
-          ),
-
-          // テキスト情報
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // ジャンルタグ
-                  Container(
+                // キャンパスバッジ
+                Positioned(
+                  top: 6,
+                  left: 6,
+                  child: Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
+                      horizontal: 8,
+                      vertical: 3,
                     ),
                     decoration: BoxDecoration(
-                      color: AppTheme.primary.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(4),
+                      color: _campusColor(),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
-                      organization.category.label,
+                      organization.campus.label,
                       style: const TextStyle(
+                        color: Colors.white,
                         fontSize: 10,
-                        color: AppTheme.primary,
-                        fontWeight: FontWeight.w500,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  // 団体名
-                  Text(
-                    organization.name,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary,
+                ),
+              ],
+            ),
+
+            // テキスト情報
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ジャンルタグ
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        organization.category.label,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: AppTheme.primary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  // 説明文
-                  Expanded(
-                    child: Text(
-                      organization.description,
+                    const SizedBox(height: 6),
+                    // 団体名
+                    Text(
+                      organization.name,
                       style: const TextStyle(
-                        fontSize: 11,
-                        color: AppTheme.textSecondary,
-                        height: 1.3,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimary,
                       ),
-                      maxLines: 2,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 4),
+                    // 説明文
+                    Expanded(
+                      child: Text(
+                        organization.description,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.textSecondary,
+                          height: 1.3,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

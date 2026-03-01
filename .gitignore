@@ -52,3 +52,12 @@ macos/Runner/GoogleService-Info.plist
 
 # Env vars
 .env
+
+# Analysis and logs
+analyze*.txt
+deploy_res.txt
+error.log
+emulator.log
+lint_results.txt
+analyze_*.txt
+*.log

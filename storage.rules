@@ -1,0 +1,31 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isImage() {
+      return request.resource.contentType.matches('image/.*');
+    }
+    
+    function isLessThan5MB() {
+      return request.resource.size < 5 * 1024 * 1024;
+    }
+
+    // ユーザーアイコン
+    match /users/{userId}/icon/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId && isImage() && isLessThan5MB();
+    }
+    
+    // 団体ロゴ・活動写真
+    match /organizations/{orgId}/{folder}/{fileName} {
+      // 誰でも読み取れる
+      allow read: if isAuthenticated();
+      // orgIdとユーザーIDが一致する場合のみアップロード可能（5MB以下の画像のみ）
+      allow write: if isAuthenticated() && request.auth.uid == orgId && isImage() && isLessThan5MB();
+    }
+  }
+}

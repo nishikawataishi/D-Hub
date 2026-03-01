@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
-import '../data/mock_data.dart';
-import '../theme/app_theme.dart';
 import '../services/auth_service.dart';
+import '../services/firestore_service.dart';
+import '../models/campus.dart';
+import '../models/user_profile.dart';
+import '../theme/app_theme.dart';
+import 'profile_edit_screen.dart';
 
 /// マイページ画面
 /// プロフィール表示、興味関心タグの編集、設定メニュー
@@ -16,21 +19,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isEditingTags = false;
   final _tagController = TextEditingController();
   final _authService = AuthService();
+  final _firestoreService = FirestoreService();
 
   /// タグの追加
-  void _addTag(String tag) {
+  Future<void> _addTag(String tag, UserProfile profile) async {
     final trimmed = tag.trim();
-    if (trimmed.isEmpty || mockUser.interests.contains(trimmed)) return;
-    setState(() {
-      mockUser.interests.add(trimmed);
-    });
+    if (trimmed.isEmpty || profile.interests.contains(trimmed)) return;
+
+    final newInterests = List<String>.from(profile.interests)..add(trimmed);
     _tagController.clear();
+
+    // Firestore を更新
+    await _firestoreService.updateUserProfile(profile.id, {
+      'interests': newInterests,
+    });
   }
 
   /// タグの削除
-  void _removeTag(String tag) {
-    setState(() {
-      mockUser.interests.remove(tag);
+  Future<void> _removeTag(String tag, UserProfile profile) async {
+    final newInterests = List<String>.from(profile.interests)..remove(tag);
+
+    // Firestore を更新
+    await _firestoreService.updateUserProfile(profile.id, {
+      'interests': newInterests,
     });
   }
 
@@ -42,31 +53,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final user = _authService.currentUser;
+    if (user == null) {
+      return const Center(child: Text('ログインしていません'));
+    }
+
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(title: const Text('マイページ')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            // プロフィールカード
-            _buildProfileCard(),
-            const SizedBox(height: 20),
+      body: StreamBuilder<UserProfile?>(
+        stream: _firestoreService.getUserProfileStream(user.uid),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(child: Text('エラーが発生しました: ${snapshot.error}'));
+          }
 
-            // 興味・関心タグセクション
-            _buildInterestSection(),
-            const SizedBox(height: 20),
+          // プロフィールがまだ存在しない場合のデフォルト表示
+          final profile =
+              snapshot.data ??
+              UserProfile(
+                id: user.uid,
+                name: '未設定',
+                faculty: '未設定',
+                grade: 1,
+                mainCampus: Campus.imadegawa,
+                interests: [],
+              );
 
-            // 設定メニュー
-            _buildSettingsMenu(),
-          ],
-        ),
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                // プロフィールカード
+                _buildProfileCard(profile),
+                const SizedBox(height: 20),
+
+                // 興味・関心タグセクション
+                _buildInterestSection(profile),
+                const SizedBox(height: 20),
+
+                // 設定メニュー
+                _buildSettingsMenu(profile),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
 
   /// プロフィールカード
-  Widget _buildProfileCard() {
+  Widget _buildProfileCard(UserProfile profile) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
@@ -82,7 +122,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             width: 80,
             height: 80,
             decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: 0.1),
+              color: AppTheme.primary.withAlpha(25), // 0.1 * 255 ≈ 25
               shape: BoxShape.circle,
             ),
             child: const Icon(Icons.person, size: 40, color: AppTheme.primary),
@@ -91,7 +131,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
           // 名前
           Text(
-            mockUser.name,
+            profile.name,
             style: const TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.w700,
@@ -104,16 +144,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _InfoChip(icon: Icons.school_outlined, label: mockUser.faculty),
+              _InfoChip(icon: Icons.school_outlined, label: profile.faculty),
               const SizedBox(width: 8),
-              _InfoChip(
-                icon: Icons.badge_outlined,
-                label: '${mockUser.grade}年',
-              ),
+              _InfoChip(icon: Icons.badge_outlined, label: '${profile.grade}年'),
               const SizedBox(width: 8),
               _InfoChip(
                 icon: Icons.location_on_outlined,
-                label: mockUser.mainCampus.label,
+                label: profile.mainCampus.label,
               ),
             ],
           ),
@@ -123,7 +160,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   /// 興味・関心セクション
-  Widget _buildInterestSection() {
+  Widget _buildInterestSection(UserProfile profile) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
@@ -168,7 +205,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: mockUser.interests.map((tag) {
+              children: profile.interests.map((tag) {
                 return AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
                   child: Chip(
@@ -176,8 +213,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     deleteIcon: _isEditingTags
                         ? const Icon(Icons.close, size: 16)
                         : null,
-                    onDeleted: _isEditingTags ? () => _removeTag(tag) : null,
-                    backgroundColor: AppTheme.primary.withValues(alpha: 0.08),
+                    onDeleted: _isEditingTags
+                        ? () => _removeTag(tag, profile)
+                        : null,
+                    backgroundColor: AppTheme.primary.withAlpha(
+                      20,
+                    ), // 0.08 * 255 ≈ 20
                     labelStyle: const TextStyle(
                       color: AppTheme.primary,
                       fontSize: 13,
@@ -208,12 +249,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         vertical: 10,
                       ),
                     ),
-                    onSubmitted: _addTag,
+                    onSubmitted: (text) => _addTag(text, profile),
                   ),
                 ),
                 const SizedBox(width: 8),
                 IconButton(
-                  onPressed: () => _addTag(_tagController.text),
+                  onPressed: () => _addTag(_tagController.text, profile),
                   icon: const Icon(Icons.add_circle, color: AppTheme.primary),
                   tooltip: '追加',
                 ),
@@ -226,7 +267,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   /// 設定メニュー
-  Widget _buildSettingsMenu() {
+  Widget _buildSettingsMenu(UserProfile profile) {
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.surface,
@@ -238,7 +279,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _SettingsTile(
             icon: Icons.person_outline,
             title: 'プロフィール編集',
-            onTap: () {},
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ProfileEditScreen(profile: profile),
+                ),
+              );
+            },
           ),
           const Divider(height: 1, indent: 56),
           _SettingsTile(
@@ -279,13 +327,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               );
               if (confirmed == true && mounted) {
                 await _authService.signOut();
-                if (mounted) {
-                  Navigator.pushNamedAndRemoveUntil(
-                    context,
-                    '/login',
-                    (route) => false,
-                  );
-                }
               }
             },
             isDestructive: true,
@@ -356,7 +397,7 @@ class _SettingsTile extends StatelessWidget {
       ),
       trailing: Icon(
         Icons.chevron_right,
-        color: AppTheme.textSecondary.withValues(alpha: 0.5),
+        color: AppTheme.textSecondary.withAlpha(127), // 0.5 * 255 ≈ 127
       ),
       onTap: onTap,
     );

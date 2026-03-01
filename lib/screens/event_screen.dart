@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import '../data/mock_data.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:url_launcher/url_launcher.dart';
+
 import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
+import '../models/event.dart';
+import '../models/campus.dart';
+import 'event_detail_screen.dart';
 
 /// イベント画面
 /// 新歓・説明会のスケジュールを日付別に表示。Firestoreからリアルタイム取得。
@@ -23,13 +27,11 @@ class EventScreen extends StatelessWidget {
     }
   }
 
-  /// イベントデータ（Map）を日付ごとにグループ化
-  Map<String, List<Map<String, dynamic>>> _groupByDate(
-    List<Map<String, dynamic>> events,
-  ) {
-    final grouped = <String, List<Map<String, dynamic>>>{};
+  /// イベントデータを日付ごとにグループ化
+  Map<String, List<Event>> _groupByDate(List<Event> events) {
+    final grouped = <String, List<Event>>{};
     for (final event in events) {
-      final startAt = (event['startAt'] as Timestamp).toDate();
+      final startAt = event.startAt;
       final dateKey =
           '${startAt.year}/${startAt.month.toString().padLeft(2, '0')}/${startAt.day.toString().padLeft(2, '0')}';
       grouped.putIfAbsent(dateKey, () => []).add(event);
@@ -48,31 +50,20 @@ class EventScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(title: const Text('イベント')),
-      body: StreamBuilder<List<Map<String, dynamic>>>(
+      body: StreamBuilder<List<Event>>(
         stream: _firestoreService.getUpcomingEvents(),
         builder: (context, snapshot) {
-          // Firestoreデータがあればそれを使用、なければモックデータ
-          List<Map<String, dynamic>> eventData;
-          bool isFirestore = snapshot.hasData && snapshot.data!.isNotEmpty;
-
-          if (isFirestore) {
-            eventData = snapshot.data!;
-          } else {
-            // モックデータをMap形式に変換
-            eventData = mockEvents
-                .map(
-                  (e) => {
-                    'id': e.id,
-                    'title': e.title,
-                    'description': e.description,
-                    'organizationName': e.organization.name,
-                    'organizationEmoji': e.organization.logoEmoji,
-                    'startAt': Timestamp.fromDate(e.startAt),
-                    'campus': e.campus.name,
-                  },
-                )
-                .toList();
+          if (snapshot.hasError) {
+            debugPrint("EventScreen Error: ${snapshot.error}");
+            return Center(child: Text("エラーが発生しました: ${snapshot.error}"));
           }
+
+          if (snapshot.connectionState == ConnectionState.waiting &&
+              !snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final eventData = snapshot.data ?? [];
 
           final grouped = _groupByDate(eventData);
           final dateKeys = grouped.keys.toList()..sort();
@@ -103,8 +94,7 @@ class EventScreen extends StatelessWidget {
             itemBuilder: (context, index) {
               final dateKey = dateKeys[index];
               final events = grouped[dateKey]!;
-              final firstStartAt = (events.first['startAt'] as Timestamp)
-                  .toDate();
+              final firstStartAt = events.first.startAt;
 
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -147,35 +137,63 @@ class EventScreen extends StatelessWidget {
 
                   // イベントカードリスト
                   ...events.map((event) {
-                    final startAt = (event['startAt'] as Timestamp).toDate();
-                    final campusStr = event['campus'] as String? ?? 'both';
-                    final campus = Campus.values.firstWhere(
-                      (c) => c.name == campusStr,
-                      orElse: () => Campus.both,
-                    );
+                    final startAt = event.startAt;
+                    final campus = event.campus;
 
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 10),
                       child: _EventCard(
-                        title: event['title'] ?? '',
-                        description: event['description'] ?? '',
-                        orgName: event['organizationName'] ?? '',
-                        orgEmoji: event['organizationEmoji'] ?? '🏫',
+                        title: event.title,
+                        description: event.description,
+                        orgName: event.organization.name,
+                        orgEmoji: event.organization.logoEmoji,
                         startAt: startAt,
                         campus: campus,
                         campusColor: _campusColor(campus),
-                        onCalendarTap: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                '📅 「${event['title']}」をカレンダーに追加しました',
-                              ),
-                              behavior: SnackBarBehavior.floating,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
+                        onCardTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  EventDetailScreen(event: event),
                             ),
                           );
+                        },
+                        onCalendarTap: () async {
+                          if (kIsWeb) {
+                            // Web環境: Google Calendar URLを開く
+                            final s = startAt.toUtc();
+                            final e2 = s.add(const Duration(hours: 2));
+                            String fmt(DateTime d) =>
+                                '${d.toIso8601String().replaceAll(RegExp(r'[-:]'), '').split('.').first}Z';
+                            final url = Uri.parse(
+                              'https://calendar.google.com/calendar/render'
+                              '?action=TEMPLATE'
+                              '&text=${Uri.encodeComponent(event.title)}'
+                              '&dates=${fmt(s)}/${fmt(e2)}'
+                              '&details=${Uri.encodeComponent(event.description)}'
+                              '&location=${Uri.encodeComponent(campus.label)}',
+                            );
+                            if (await canLaunchUrl(url)) {
+                              await launchUrl(
+                                url,
+                                mode: LaunchMode.externalApplication,
+                              );
+                            }
+                          }
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  '📅 「${event.title}」をカレンダーに追加しました',
+                                ),
+                                behavior: SnackBarBehavior.floating,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            );
+                          }
                         },
                       ),
                     );
@@ -199,6 +217,7 @@ class _EventCard extends StatelessWidget {
   final DateTime startAt;
   final Campus campus;
   final Color campusColor;
+  final VoidCallback onCardTap;
   final VoidCallback onCalendarTap;
 
   const _EventCard({
@@ -209,105 +228,112 @@ class _EventCard extends StatelessWidget {
     required this.startAt,
     required this.campus,
     required this.campusColor,
+    required this.onCardTap,
     required this.onCalendarTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.border),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 時間表示
-          Column(
-            children: [
-              Text(
-                '${startAt.hour.toString().padLeft(2, '0')}:${startAt.minute.toString().padLeft(2, '0')}',
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: campusColor,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  campus.label,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 9,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(width: 14),
-
-          // イベント情報
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    return GestureDetector(
+      onTap: onCardTap,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.border),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 時間表示
+            Column(
               children: [
                 Text(
-                  title,
+                  '${startAt.hour.toString().padLeft(2, '0')}:${startAt.minute.toString().padLeft(2, '0')}',
                   style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
                     color: AppTheme.textPrimary,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  description,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppTheme.textSecondary,
-                    height: 1.4,
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
                   ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Text(orgEmoji, style: const TextStyle(fontSize: 12)),
-                    const SizedBox(width: 4),
-                    Text(
-                      orgName,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppTheme.textSecondary,
-                      ),
+                  decoration: BoxDecoration(
+                    color: campusColor,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    campus.label,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
                     ),
-                  ],
+                  ),
                 ),
               ],
             ),
-          ),
+            const SizedBox(width: 14),
 
-          // カレンダー追加ボタン
-          IconButton(
-            onPressed: onCalendarTap,
-            icon: const Icon(
-              Icons.calendar_today_outlined,
-              size: 20,
-              color: AppTheme.primary,
+            // イベント情報
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    description,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                      height: 1.4,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Text(orgEmoji, style: const TextStyle(fontSize: 12)),
+                      const SizedBox(width: 4),
+                      Text(
+                        orgName,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-            tooltip: 'カレンダーに追加',
-          ),
-        ],
+
+            // カレンダー追加ボタン
+            IconButton(
+              onPressed: onCalendarTap,
+              icon: const Icon(
+                Icons.calendar_today_outlined,
+                size: 20,
+                color: AppTheme.primary,
+              ),
+              tooltip: 'カレンダーに追加',
+            ),
+          ],
+        ),
       ),
     );
   }

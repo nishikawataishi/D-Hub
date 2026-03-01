@@ -1,6 +1,8 @@
 import 'dart:math';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import '../models/organization.dart';
 
 /// Firebase Authentication + 学生認証（2層）の認証サービス
 ///
@@ -30,6 +32,7 @@ class AuthService {
   Future<AuthResult> signUp({
     required String email,
     required String password,
+    bool isOrganization = false, // 団体アカウント登録フラグ
   }) async {
     try {
       await _auth.createUserWithEmailAndPassword(
@@ -38,7 +41,7 @@ class AuthService {
       );
 
       // Firestoreにユーザードキュメントを作成
-      await _createUserDocument();
+      await _createUserDocument(isOrganization: isOrganization);
 
       return AuthResult.success('アカウントを作成しました');
     } on FirebaseAuthException catch (e) {
@@ -128,11 +131,23 @@ class AuthService {
         'isStudentVerified': false,
       }, SetOptions(merge: true));
 
-      // TODO: 本番ではCloud Functionsでメール送信
-      // MVP段階ではコードを返してSnackBarで表示
-      return AuthResult.successWithCode('確認コードを生成しました', code);
+      // Cloud Functionsでメール送信
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'sendVerificationCode',
+      );
+      await callable.call({
+        'email': universityEmail.trim().toLowerCase(),
+        'code': code,
+      });
+
+      return AuthResult.success(
+        '確認コードを送信しました\n大学のメールボックス（迷惑メールフォルダ等も）を確認してください',
+      );
     } catch (e) {
-      return AuthResult.failure('確認コードの生成に失敗しました');
+      if (e is FirebaseFunctionsException) {
+        return AuthResult.failure('メールの送信に失敗しました: ${e.message}');
+      }
+      return AuthResult.failure('確認コードの生成・送信に失敗しました');
     }
   }
 
@@ -180,17 +195,40 @@ class AuthService {
   // ─── ユーティリティ ───
 
   /// Firestoreにユーザードキュメントを作成
-  Future<void> _createUserDocument() async {
+  /// 注意: 団体アカウントフラグ (isOrganization) がtrue、
+  /// またはいままでの暫定対応として 'admin@' パターンを含む場合
+  Future<void> _createUserDocument({bool isOrganization = false}) async {
     final user = _auth.currentUser;
     if (user == null) return;
 
-    final doc = await _firestore.collection('users').doc(user.uid).get();
-    if (!doc.exists) {
-      await _firestore.collection('users').doc(user.uid).set({
-        'email': user.email,
-        'isStudentVerified': false,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+    if (isOrganization ||
+        (user.email != null && user.email!.contains('admin@'))) {
+      // 団体アカウントとして作成
+      final doc = await _firestore
+          .collection('organizations')
+          .doc(user.uid)
+          .get();
+      if (!doc.exists) {
+        final mockOrg = Organization.empty(user.uid);
+        // 新規登録直後のため、ダミーの団体名を入れて後から編集させる想定
+        await _firestore
+            .collection('organizations')
+            .doc(user.uid)
+            .set(
+              mockOrg.toJson()
+                ..addAll({'createdAt': FieldValue.serverTimestamp()}),
+            );
+      }
+    } else {
+      // 学生アカウントの初期化
+      final doc = await _firestore.collection('users').doc(user.uid).get();
+      if (!doc.exists) {
+        await _firestore.collection('users').doc(user.uid).set({
+          'email': user.email,
+          'isStudentVerified': false,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
     }
   }
 
