@@ -68,6 +68,7 @@
 	</array>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
+		<string>https</string>
 		<string>calshow</string>
 	</array>
 </dict>

@@ -6,6 +6,7 @@ import '../services/firestore_service.dart';
 import '../models/organization.dart';
 import '../models/campus.dart';
 import 'group_detail_screen.dart';
+import 'components/verified_badge.dart';
 
 /// ホーム画面
 /// 団体一覧を2列グリッドで表示。検索・ジャンルフィルタリング機能付き。
@@ -25,6 +26,8 @@ class _HomeScreenState extends State<HomeScreen> {
   /// 検索とフィルタリング（リスト内でクライアント側フィルタ）
   List<Organization> _filterOrganizations(List<Organization> orgs) {
     return orgs.where((org) {
+      // 一般ユーザーには認証済み団体のみ表示
+      final isVerified = org.status == 'verified';
       final matchesCategory =
           _selectedCategory == OrgCategory.all ||
           org.categories.contains(_selectedCategory);
@@ -32,7 +35,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _searchQuery.isEmpty ||
           org.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
           org.description.toLowerCase().contains(_searchQuery.toLowerCase());
-      return matchesCategory && matchesSearch;
+      return isVerified && matchesCategory && matchesSearch;
     }).toList();
   }
 
@@ -297,15 +300,25 @@ class _OrganizationCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     // 団体名
-                    Text(
-                      organization.name,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.textPrimary,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            organization.name,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.textPrimary,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (organization.status == 'verified') ...[
+                          const SizedBox(width: 4),
+                          const VerifiedBadge(size: 14, showTooltip: false),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 4),
                     // 説明文

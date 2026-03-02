@@ -102,6 +102,9 @@ class FirestoreService {
       throw Exception('すでにこの学生には未読のスカウトを送信済みです。');
     }
 
+    // 学生の情報を取得してアイコンURLを保持
+    final studentProfile = await getUserProfile(targetUserId);
+
     final now = DateTime.now();
     final scoutData = Scout(
       id: '', // Firestoreが自動生成するため空でOKだが、toFirestoreでは保存されない
@@ -117,6 +120,7 @@ class FirestoreService {
       sentAt: now,
       organizationInstagramUrl: senderOrg.instagramUrl,
       organizationLogoUrl: senderOrg.logoUrl,
+      targetUserIconUrl: studentProfile?.iconUrl,
     ).toFirestore();
 
     scoutData['sentAt'] = FieldValue.serverTimestamp();

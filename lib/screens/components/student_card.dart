@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../theme/app_theme.dart';
 import '../../models/user_profile.dart';
 
@@ -22,10 +23,22 @@ class StudentCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ユーザーアイコン
-              CircleAvatar(
-                radius: 24,
-                backgroundColor: AppTheme.primary.withAlpha(25),
-                child: const Icon(Icons.person, color: AppTheme.primary),
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withAlpha(25),
+                  shape: BoxShape.circle,
+                  image: student.iconUrl != null
+                      ? DecorationImage(
+                          image: CachedNetworkImageProvider(student.iconUrl!),
+                          fit: BoxFit.cover,
+                        )
+                      : null,
+                ),
+                child: student.iconUrl == null
+                    ? const Icon(Icons.person, color: AppTheme.primary)
+                    : null,
               ),
               const SizedBox(width: 16),
               // 学生情報

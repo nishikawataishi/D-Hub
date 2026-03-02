@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../models/organization.dart';
 import '../models/event.dart';
 import '../theme/app_theme.dart';
+import '../screens/components/verified_badge.dart';
 import '../services/firestore_service.dart';
 import 'event_detail_screen.dart';
 
@@ -40,7 +41,7 @@ class GroupDetailScreen extends StatelessWidget {
                 width: 100,
                 height: 100,
                 decoration: BoxDecoration(
-                  color: AppTheme.primary.withAlpha(25),
+                  color: AppTheme.primary.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                   image: organization.logoUrl != null
                       ? DecorationImage(
@@ -63,12 +64,21 @@ class GroupDetailScreen extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Center(
-              child: Text(
-                organization.name,
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    organization.name,
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  if (organization.status == 'verified') ...[
+                    const SizedBox(width: 8),
+                    const VerifiedBadge(size: 24),
+                  ],
+                ],
               ),
             ),
             Center(

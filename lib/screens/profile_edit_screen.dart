@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:image_picker/image_picker.dart';
-import 'package:image_cropper/image_cropper.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import '../models/user_profile.dart';
 import '../models/campus.dart';
 import '../services/firestore_service.dart';
 import '../services/storage_service.dart';
+import '../services/image_service.dart';
 import '../theme/app_theme.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 /// プロフィール編集画面
 class ProfileEditScreen extends StatefulWidget {
@@ -91,41 +89,14 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
 
   Future<void> _pickAndUploadImage() async {
     try {
-      final picker = ImagePicker();
-      // アップロード高速化のため、取得時にリサイズと圧縮を行う
-      final pickedFile = await picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 512,
-        maxHeight: 512,
-        imageQuality: 80,
-      );
-      if (!mounted || pickedFile == null) return;
-
-      late XFile finalFile;
-
-      if (kIsWeb) {
-        finalFile = pickedFile;
-      } else {
-        final croppedFile = await ImageCropper().cropImage(
-          sourcePath: pickedFile.path,
-          aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
-          uiSettings: [
-            AndroidUiSettings(
-              toolbarTitle: '画像のトリミング',
-              toolbarColor: AppTheme.primary,
-              toolbarWidgetColor: Colors.white,
-              initAspectRatio: CropAspectRatioPreset.square,
-              lockAspectRatio: true,
-            ),
-            IOSUiSettings(title: '画像のトリミング', aspectRatioLockEnabled: true),
-          ],
-        );
-
-        if (croppedFile == null) return;
-        finalFile = XFile(croppedFile.path);
-      }
-
       setState(() => _isUploadingImage = true);
+
+      // ImageService を使用して画像を選択・加工
+      final finalFile = await ImageService().pickAndProcessImage();
+      if (!mounted || finalFile == null) {
+        setState(() => _isUploadingImage = false);
+        return;
+      }
 
       final url = await StorageService().uploadUserIcon(
         userId: widget.profile.id,

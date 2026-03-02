@@ -6,10 +6,14 @@ import '../services/auth_notifier.dart';
 import '../services/firestore_service.dart';
 import '../models/user_profile.dart';
 import '../models/event.dart';
+import '../models/organization.dart';
 import 'components/student_card.dart';
 import 'components/org_profile_edit_tab.dart';
+import 'org_create_screen.dart'; // 新規追加
 import 'student_detail_screen.dart';
 import 'event_edit_screen.dart';
+// Added this import as it seems to be intended for event details
+import 'components/verified_badge.dart'; // Added this import as it seems to be intended for verified badge
 
 /// 団体用ダッシュボード画面
 /// 学生検索・スカウト、団体プロフィール編集、イベント管理などを行う
@@ -22,20 +26,64 @@ class OrgDashboardScreen extends StatefulWidget {
 
 class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
   int _selectedIndex = 0;
+  Organization? _currentOrg;
+  bool _isOrgLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOrgStatus();
+  }
+
+  Future<void> _loadOrgStatus() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final org = await FirestoreService().getOrganization(user.uid);
+      if (mounted) {
+        setState(() {
+          _currentOrg = org;
+          _isOrgLoading = false;
+        });
+      }
+    } else {
+      if (mounted) setState(() => _isOrgLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    if (_isOrgLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    // 団体情報がない場合は作成画面へ誘導するか、未登録状態を表示
+    if (_currentOrg == null) {
+      return _buildNoOrgView();
+    }
+
+    final status = _currentOrg!.status;
+    final isVerified = status == 'verified';
+
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text(
-          '団体ダッシュボード',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-            letterSpacing: -0.5,
-          ),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '団体ダッシュボード',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.5,
+              ),
+            ),
+            if (isVerified) ...[
+              const SizedBox(width: 8),
+              const VerifiedBadge(size: 20),
+            ],
+          ],
         ),
         backgroundColor: AppTheme.surface,
         elevation: 0,
@@ -48,8 +96,13 @@ class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
           ),
         ],
       ),
-      body: _buildBody(),
-      floatingActionButton: _selectedIndex == 2
+      body: Column(
+        children: [
+          if (!isVerified) _buildStatusBanner(status),
+          Expanded(child: _buildBody()),
+        ],
+      ),
+      floatingActionButton: _selectedIndex == 2 && isVerified
           ? FloatingActionButton(
               onPressed: () {
                 Navigator.push(
@@ -113,6 +166,26 @@ class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
 
   /// 学生検索タブ
   Widget _buildStudentSearchTab() {
+    if (_currentOrg?.status != 'verified') {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.lock_outline,
+              size: 64,
+              color: AppTheme.textSecondary.withOpacity(0.5),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              '審査承認後に学生検索が利用可能になります',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
+          ],
+        ),
+      );
+    }
+
     return StreamBuilder<List<UserProfile>>(
       stream: FirestoreService().getStudents(),
       builder: (context, snapshot) {
@@ -284,5 +357,108 @@ class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
 
   Widget _buildOrgProfileTab() {
     return const OrgProfileEditTab();
+  }
+
+  /// 団体未登録時の表示
+  Widget _buildNoOrgView() {
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(
+        title: const Text('団体ダッシュボード'),
+        backgroundColor: AppTheme.surface,
+        elevation: 0,
+        actions: [
+          IconButton(
+            onPressed: () async {
+              await FirebaseAuth.instance.signOut();
+              if (mounted) Navigator.pushReplacementNamed(context, '/');
+            },
+            icon: const Icon(Icons.logout, color: AppTheme.textSecondary),
+          ),
+        ],
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.group_add_outlined,
+                size: 80,
+                color: AppTheme.textSecondary,
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                '団体が登録されていません',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'スカウト送信やイベント掲載を始めるには、まず団体作成の申請を行ってください。',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppTheme.textSecondary, height: 1.5),
+              ),
+              const SizedBox(height: 32),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const OrgCreateScreen(),
+                      ),
+                    ).then((_) => _loadOrgStatus());
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    '団体作成を申請する',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// ステータスバナー
+  Widget _buildStatusBanner(String status) {
+    final isPending = status == 'pending';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      color: isPending ? Colors.amber.shade50 : Colors.red.shade50,
+      child: Row(
+        children: [
+          Icon(
+            isPending ? Icons.hourglass_empty : Icons.error_outline,
+            color: isPending ? Colors.amber.shade800 : Colors.red.shade800,
+            size: 20,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              isPending ? '審査中：承認されるまで機能が制限されます。' : '申請却下：内容を確認し、再申請してください。',
+              style: TextStyle(
+                color: isPending ? Colors.amber.shade900 : Colors.red.shade900,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

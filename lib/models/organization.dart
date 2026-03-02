@@ -1,4 +1,8 @@
+import 'package:freezed_annotation/freezed_annotation.dart';
 import 'campus.dart';
+
+part 'organization.freezed.dart';
+part 'organization.g.dart';
 
 enum OrgCategory {
   all('すべて'),
@@ -34,26 +38,52 @@ enum OrgCategory {
   }
 }
 
-class Organization {
-  final String id;
-  final String name;
-  final String description;
-  final List<OrgCategory> categories;
-  final Campus campus;
-  final String logoEmoji;
-  final String instagramUrl;
-  final String? logoUrl;
+@freezed
+class Organization with _$Organization {
+  const factory Organization({
+    required String id,
+    required String name,
+    required String description,
+    required List<OrgCategory> categories,
+    required Campus campus,
+    required String logoEmoji,
+    @Default('') String instagramUrl,
+    String? logoUrl,
+    // 追加フィールド
+    String? representativeId,
+    @Default('pending') String status, // 'pending', 'verified', 'rejected'
+    String? proofImageUrl,
+    DateTime? verifiedAt,
+    @Default(false) bool isOfficial,
+    DateTime? createdAt,
+  }) = _Organization;
 
-  const Organization({
-    required this.id,
-    required this.name,
-    required this.description,
-    required this.categories,
-    required this.campus,
-    required this.logoEmoji,
-    this.instagramUrl = '',
-    this.logoUrl,
-  });
+  factory Organization.fromJson(Map<String, dynamic> json) =>
+      _$OrganizationFromJson(json);
+
+  /// 手動デコード用（FirestoreのドキュメントIDをIDフィールドにセットするため）
+  factory Organization.fromFirestore(Map<String, dynamic> json, String id) {
+    // カテゴリの古い形式への対応
+    List<dynamic> categoriesJson = [];
+    if (json['categories'] != null) {
+      categoriesJson = json['categories'] as List;
+    } else if (json['category'] != null) {
+      categoriesJson = [json['category']];
+    }
+
+    return Organization.fromJson({
+      ...json,
+      'id': id,
+      'categories': categoriesJson,
+      // TimestampをDateTimeに変換
+      if (json['verifiedAt'] != null)
+        'verifiedAt': (json['verifiedAt'] as dynamic)
+            .toDate()
+            .toIso8601String(),
+      if (json['createdAt'] != null)
+        'createdAt': (json['createdAt'] as dynamic).toDate().toIso8601String(),
+    });
+  }
 
   /// 認証時に初期化する空のプロファイル
   factory Organization.empty(String id) {
@@ -66,46 +96,5 @@ class Organization {
       logoEmoji: '🎨',
       instagramUrl: '',
     );
-  }
-
-  /// Firestoreドキュメントからの変換
-  factory Organization.fromJson(Map<String, dynamic> json, String id) {
-    List<OrgCategory> categories = [];
-    if (json['categories'] != null) {
-      categories = (json['categories'] as List)
-          .map((e) => OrgCategory.fromString(e as String))
-          .toList();
-    } else if (json['category'] != null) {
-      // 後方互換性：単一のcategoryフィールドがある場合
-      categories = [OrgCategory.fromString(json['category'] as String)];
-    }
-
-    if (categories.isEmpty) {
-      categories = [OrgCategory.culture];
-    }
-
-    return Organization(
-      id: id,
-      name: json['name'] as String? ?? '',
-      description: json['description'] as String? ?? '',
-      categories: categories,
-      campus: Campus.fromString(json['campus'] as String? ?? ''),
-      logoEmoji: json['logoEmoji'] as String? ?? '🎨',
-      instagramUrl: json['instagramUrl'] as String? ?? '',
-      logoUrl: json['logoUrl'] as String?,
-    );
-  }
-
-  /// Firestore保存用データの生成
-  Map<String, dynamic> toJson() {
-    return {
-      'name': name,
-      'description': description,
-      'categories': categories.map((e) => e.name).toList(),
-      'campus': campus.name,
-      'logoEmoji': logoEmoji,
-      'instagramUrl': instagramUrl,
-      if (logoUrl != null) 'logoUrl': logoUrl,
-    };
   }
 }

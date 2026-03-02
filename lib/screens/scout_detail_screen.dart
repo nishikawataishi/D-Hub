@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
@@ -33,18 +35,62 @@ class _ScoutDetailScreenState extends State<ScoutDetailScreen> {
   }
 
   Future<void> _handleContact() async {
-    final String urlString =
-        widget.scout.organizationInstagramUrl ?? 'https://www.instagram.com/';
-    final Uri url = Uri.parse(urlString);
+    String inputUrl = widget.scout.organizationInstagramUrl?.trim() ?? '';
 
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
+    // 何も入力されていない場合は、デフォルトでInstagramのトップ（または団体名で検索など）を表示
+    if (inputUrl.isEmpty) {
+      inputUrl = 'https://www.instagram.com/';
+    }
+
+    // @で始まる場合はユーザー名として扱う（例: @username -> username）
+    if (inputUrl.startsWith('@')) {
+      inputUrl = inputUrl.substring(1);
+    }
+
+    String finalUrlString;
+    if (inputUrl.startsWith('http://') || inputUrl.startsWith('https://')) {
+      // 既にフルURLの場合はそのまま使用
+      finalUrlString = inputUrl;
+    } else if (inputUrl.contains('instagram.com')) {
+      // ドメインが含まれているがスキームがない場合（例: instagram.com/xxx）
+      finalUrlString = 'https://$inputUrl';
     } else {
+      // ユーザー名のみと推測される場合
+      // 斜線などの不要な文字をトリミング
+      final cleanPath = inputUrl.endsWith('/')
+          ? inputUrl.substring(0, inputUrl.length - 1)
+          : inputUrl;
+      finalUrlString = 'https://www.instagram.com/$cleanPath/';
+    }
+
+    final Uri url = Uri.parse(finalUrlString);
+
+    try {
+      // Web環境とモバイル環境で使い分ける
+      final LaunchMode mode = kIsWeb
+          ? LaunchMode.platformDefault
+          : LaunchMode.externalApplication;
+
+      bool launched = false;
+      if (await canLaunchUrl(url)) {
+        launched = await launchUrl(url, mode: mode);
+      }
+
+      if (!launched) {
+        // canLaunchUrlの結果に関わらず直接試行（フォールバック）
+        launched = await launchUrl(url, mode: mode);
+      }
+
+      if (!launched && mounted) {
+        throw Exception('Could not launch');
+      }
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('指定されたURLを開けませんでした'),
+          SnackBar(
+            content: Text('Instagramを開けませんでした。URLを確認してください: $finalUrlString'),
             backgroundColor: AppTheme.error,
+            duration: const Duration(seconds: 5),
           ),
         );
       }
@@ -118,10 +164,23 @@ class _ScoutDetailScreenState extends State<ScoutDetailScreen> {
                   decoration: BoxDecoration(
                     color: AppTheme.primary.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
+                    image: widget.scout.organizationLogoUrl != null
+                        ? DecorationImage(
+                            image: CachedNetworkImageProvider(
+                              widget.scout.organizationLogoUrl!,
+                            ),
+                            fit: BoxFit.cover,
+                          )
+                        : null,
                   ),
-                  child: Center(
-                    child: Text(orgEmoji, style: const TextStyle(fontSize: 28)),
-                  ),
+                  child: widget.scout.organizationLogoUrl == null
+                      ? Center(
+                          child: Text(
+                            orgEmoji,
+                            style: const TextStyle(fontSize: 28),
+                          ),
+                        )
+                      : null,
                 ),
                 const SizedBox(width: 16),
                 Expanded(

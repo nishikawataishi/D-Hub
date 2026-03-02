@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../services/auth_notifier.dart';
 import '../services/firestore_service.dart';
 import '../models/campus.dart';
@@ -123,10 +124,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
             width: 80,
             height: 80,
             decoration: BoxDecoration(
-              color: AppTheme.primary.withAlpha(25), // 0.1 * 255 ≈ 25
+              color: AppTheme.primary.withAlpha(25),
               shape: BoxShape.circle,
+              image: profile.iconUrl != null
+                  ? DecorationImage(
+                      image: CachedNetworkImageProvider(profile.iconUrl!),
+                      fit: BoxFit.cover,
+                    )
+                  : null,
             ),
-            child: const Icon(Icons.person, size: 40, color: AppTheme.primary),
+            child: profile.iconUrl == null
+                ? const Icon(Icons.person, size: 40, color: AppTheme.primary)
+                : null,
           ),
           const SizedBox(height: 14),
 

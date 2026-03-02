@@ -14,6 +14,7 @@ class Scout {
   final DateTime? readAt;
   final String? organizationInstagramUrl;
   final String? organizationLogoUrl;
+  final String? targetUserIconUrl;
 
   Scout({
     required this.id,
@@ -28,6 +29,7 @@ class Scout {
     this.readAt,
     this.organizationInstagramUrl,
     this.organizationLogoUrl,
+    this.targetUserIconUrl,
   });
 
   /// FirestoreドキュメントからScoutモデルを生成
@@ -45,6 +47,7 @@ class Scout {
       readAt: (data['readAt'] as Timestamp?)?.toDate(),
       organizationInstagramUrl: data['organizationInstagramUrl'] as String?,
       organizationLogoUrl: data['organizationLogoUrl'] as String?,
+      targetUserIconUrl: data['targetUserIconUrl'] as String?,
     );
   }
 
@@ -62,6 +65,7 @@ class Scout {
       'organizationInstagramUrl': organizationInstagramUrl,
       if (organizationLogoUrl != null)
         'organizationLogoUrl': organizationLogoUrl,
+      if (targetUserIconUrl != null) 'targetUserIconUrl': targetUserIconUrl,
     };
   }
 }
