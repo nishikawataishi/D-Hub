@@ -49,9 +49,15 @@ class Event {
       name: data['organizationName'] as String? ?? 'Unknown',
       logoEmoji: data['organizationEmoji'] as String? ?? '🏫',
       description: '',
-      category: OrgCategory.fromString(
-        data['organizationCategory'] as String? ?? '',
-      ),
+      categories:
+          (data['categories'] as List?)
+              ?.map((e) => OrgCategory.fromString(e as String))
+              .toList() ??
+          [
+            OrgCategory.fromString(
+              data['organizationCategory'] as String? ?? '',
+            ),
+          ],
       campus: Campus.both,
       logoUrl: data['organizationLogoUrl'] as String?,
     );
@@ -74,7 +80,9 @@ class Event {
       'organizationId': organization.id,
       'organizationName': organization.name,
       'organizationEmoji': organization.logoEmoji,
-      'organizationCategory': organization.category.name,
+      'organizationCategory': organization.categories.isNotEmpty
+          ? organization.categories.first.label
+          : OrgCategory.all.label,
       'title': title,
       'description': description,
       'startAt': Timestamp.fromDate(startAt),

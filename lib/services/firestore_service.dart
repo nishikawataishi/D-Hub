@@ -40,13 +40,15 @@ class FirestoreService {
   /// カテゴリで絞り込んだ団体を取得
   Stream<List<Organization>> getOrganizationsByCategory(OrgCategory category) {
     if (category == OrgCategory.all) return getOrganizations();
+    // whereArrayContains を使用して、指定したカテゴリーが含まれるドキュメントを取得
     return _db
         .collection('organizations')
-        .where('category', isEqualTo: category.name)
+        .where('categories', arrayContains: category.name)
         .snapshots()
         .map(
-          (snapshot) =>
-              snapshot.docs.map((doc) => _organizationFromDoc(doc)).toList(),
+          (snapshot) => snapshot.docs
+              .map((doc) => Organization.fromJson(doc.data(), doc.id))
+              .toList(),
         );
   }
 
@@ -107,7 +109,9 @@ class FirestoreService {
       organizationId: senderOrg.id,
       organizationName: senderOrg.name,
       organizationEmoji: senderOrg.logoEmoji,
-      organizationCategory: senderOrg.category.name,
+      organizationCategory: senderOrg.categories.isNotEmpty
+          ? senderOrg.categories.first.label
+          : OrgCategory.all.label,
       message: message,
       isRead: false,
       sentAt: now,
@@ -229,7 +233,7 @@ class FirestoreService {
       batch.set(docRef, {
         'name': org.name,
         'description': org.description,
-        'category': org.category.name,
+        'categories': org.categories.map((e) => e.name).toList(),
         'campus': org.campus.name,
         'logoEmoji': org.logoEmoji,
         'instagramUrl': org.instagramUrl,

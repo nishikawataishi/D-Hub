@@ -71,11 +71,22 @@ class GroupDetailScreen extends StatelessWidget {
                 ),
               ),
             ),
+            Center(
+              child: Text(
+                organization.categories.isNotEmpty
+                    ? organization.categories.first.label
+                    : '',
+                style: const TextStyle(
+                  color: AppTheme.primary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
             const SizedBox(height: 8),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _buildChip(organization.category.label, Icons.category),
+                _buildChip(organization.categories.first.label, Icons.category),
                 const SizedBox(width: 8),
                 _buildChip(organization.campus.label, Icons.location_on),
               ],

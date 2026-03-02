@@ -92,7 +92,13 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   Future<void> _pickAndUploadImage() async {
     try {
       final picker = ImagePicker();
-      final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+      // アップロード高速化のため、取得時にリサイズと圧縮を行う
+      final pickedFile = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 512,
+        maxHeight: 512,
+        imageQuality: 80,
+      );
       if (!mounted || pickedFile == null) return;
 
       late XFile finalFile;

@@ -6,6 +6,7 @@ import 'package:image_cropper/image_cropper.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../theme/app_theme.dart';
 import '../../models/organization.dart';
+import '../../models/campus.dart';
 import '../../services/firestore_service.dart';
 import '../../services/storage_service.dart';
 
@@ -25,6 +26,8 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
   Organization? _org;
   bool _isLoading = true;
   bool _isUploadingImage = false;
+  List<OrgCategory> _selectedCategories = [];
+  Campus _selectedCampus = Campus.both;
 
   @override
   void initState() {
@@ -45,6 +48,8 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
           _nameController.text = org.name;
           _descController.text = org.description;
           _instaController.text = org.instagramUrl;
+          _selectedCategories = List.from(org.categories);
+          _selectedCampus = org.campus;
           _isLoading = false;
         });
         return;
@@ -136,6 +141,63 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
               label: 'Instagramリンク',
               icon: Icons.link,
             ),
+            const SizedBox(height: 24),
+            _buildSectionTitle('カテゴリー（複数選択可）'),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: OrgCategory.values
+                  .where((c) => c != OrgCategory.all)
+                  .map((category) {
+                    final isSelected = _selectedCategories.contains(category);
+                    return FilterChip(
+                      label: Text(category.label),
+                      selected: isSelected,
+                      onSelected: (selected) {
+                        setState(() {
+                          if (selected) {
+                            _selectedCategories.add(category);
+                          } else {
+                            _selectedCategories.remove(category);
+                          }
+                        });
+                      },
+                      selectedColor: AppTheme.primary.withValues(alpha: 0.2),
+                      checkmarkColor: AppTheme.primary,
+                      labelStyle: TextStyle(
+                        color: isSelected
+                            ? AppTheme.primary
+                            : AppTheme.textSecondary,
+                        fontWeight: isSelected
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    );
+                  })
+                  .toList(),
+            ),
+            const SizedBox(height: 24),
+            _buildSectionTitle('活動キャンパス'),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<Campus>(
+              initialValue: _selectedCampus,
+              decoration: InputDecoration(
+                prefixIcon: const Icon(
+                  Icons.location_on,
+                  color: AppTheme.textSecondary,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              items: Campus.values.map((c) {
+                return DropdownMenuItem(value: c, child: Text(c.label));
+              }).toList(),
+              onChanged: (v) {
+                if (v != null) setState(() => _selectedCampus = v);
+              },
+            ),
             const SizedBox(height: 48),
             SizedBox(
               width: double.infinity,
@@ -209,7 +271,13 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
   Future<void> _pickAndUploadImage() async {
     try {
       final picker = ImagePicker();
-      final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+      // アップロード高速化のため、取得時にリサイズと圧縮を行う
+      final pickedFile = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 512,
+        maxHeight: 512,
+        imageQuality: 80,
+      );
       if (!mounted || pickedFile == null) return;
 
       late XFile finalFile;
@@ -253,8 +321,10 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
             id: _org!.id,
             name: _org!.name,
             description: _org!.description,
-            category: _org!.category,
-            campus: _org!.campus,
+            categories: _selectedCategories.isNotEmpty
+                ? _selectedCategories
+                : _org!.categories,
+            campus: _selectedCampus,
             logoEmoji: _org!.logoEmoji,
             instagramUrl: _org!.instagramUrl,
             logoUrl: url,
@@ -298,8 +368,10 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
         id: user.uid,
         name: _nameController.text.trim(),
         description: _descController.text.trim(),
-        category: _org!.category, // カテゴリやキャンパスは今回はそのまま（必要なら後でフォーム追加）
-        campus: _org!.campus,
+        categories: _selectedCategories.isNotEmpty
+            ? _selectedCategories
+            : [OrgCategory.culture],
+        campus: _selectedCampus,
         logoEmoji: _org!.logoEmoji,
         instagramUrl: _instaController.text.trim(),
         logoUrl: _org!.logoUrl,

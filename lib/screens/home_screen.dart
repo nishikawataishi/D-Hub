@@ -27,7 +27,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return orgs.where((org) {
       final matchesCategory =
           _selectedCategory == OrgCategory.all ||
-          org.category == _selectedCategory;
+          org.categories.contains(_selectedCategory);
       final matchesSearch =
           _searchQuery.isEmpty ||
           org.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
@@ -285,7 +285,9 @@ class _OrganizationCard extends StatelessWidget {
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
-                        organization.category.label,
+                        organization.categories.isNotEmpty
+                            ? organization.categories.first.label
+                            : '', // Display the first category's label
                         style: const TextStyle(
                           fontSize: 10,
                           color: AppTheme.primary,
