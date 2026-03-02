@@ -13,8 +13,12 @@ enum AuthStatus {
   studentUnverified, // 学生・未認証 → StudentVerifyScreen
   studentVerified,   // 学生・認証済み → MainScreen
   organization,      // 団体アカウント → OrgDashboardScreen
+  admin,             // 管理者 → AdminDashboardScreen
   error,             // エラー → リトライ画面
 }
+
+/// 管理者メールアドレスの許可リスト
+const adminEmails = ['admin@dscout.app'];
 
 /// アプリ全体の認証状態を管理するNotifier
 ///
@@ -60,6 +64,14 @@ class AuthNotifier extends ChangeNotifier {
 
   /// Firestoreからアカウント種別と認証状態を判定
   Future<void> _resolveUserStatus(String uid) async {
+    // 管理者メールアドレスチェック（Firestoreアクセス不要）
+    final email = _user?.email;
+    if (email != null && adminEmails.contains(email)) {
+      _status = AuthStatus.admin;
+      notifyListeners();
+      return;
+    }
+
     // 最大2回試行（初回 + 1秒後にリトライ）
     for (int attempt = 0; attempt < 2; attempt++) {
       try {
@@ -116,6 +128,13 @@ class AuthNotifier extends ChangeNotifier {
         password: password,
       );
       _user = _auth.currentUser;
+
+      // 管理者メールの場合はドキュメント作成不要
+      if (_user?.email != null && adminEmails.contains(_user!.email)) {
+        _status = AuthStatus.admin;
+        notifyListeners();
+        return AuthResult.success('管理者としてログインしました');
+      }
 
       // Firestoreドキュメント作成を完了させてから状態を更新
       await _createUserDocument(isOrganization: isOrganization);
@@ -220,8 +239,7 @@ class AuthNotifier extends ChangeNotifier {
     final user = _auth.currentUser;
     if (user == null) return;
 
-    if (isOrganization ||
-        (user.email != null && user.email!.contains('admin@'))) {
+    if (isOrganization) {
       // 団体アカウントとして作成
       final doc = await _firestore
           .collection('organizations')

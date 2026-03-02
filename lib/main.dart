@@ -11,6 +11,7 @@ import 'screens/login_screen.dart';
 import 'screens/main_screen.dart';
 import 'screens/student_verify_screen.dart';
 import 'screens/org_dashboard_screen.dart';
+import 'screens/admin_dashboard_screen.dart';
 import 'services/auth_notifier.dart';
 
 /// D.scout アプリのエントリーポイント
@@ -56,6 +57,7 @@ class DScoutApp extends StatelessWidget {
         '/main': (context) => const MainScreen(),
         '/verify': (context) => const StudentVerifyScreen(),
         '/org_dashboard': (context) => const OrgDashboardScreen(),
+        '/admin': (context) => const AdminDashboardScreen(),
       },
     );
   }
@@ -86,6 +88,8 @@ class AuthGate extends StatelessWidget {
             return const MainScreen();
           case AuthStatus.organization:
             return const OrgDashboardScreen();
+          case AuthStatus.admin:
+            return const AdminDashboardScreen();
           case AuthStatus.error:
             return _buildErrorScreen(context, auth);
         }

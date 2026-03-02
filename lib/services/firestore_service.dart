@@ -66,6 +66,42 @@ class FirestoreService {
     );
   }
 
+  // ─── 管理者用（Admin） ───
+
+  /// ステータスで絞り込んだ団体一覧を取得
+  Stream<List<Organization>> getOrganizationsByStatus(String status) {
+    return _db
+        .collection('organizations')
+        .where('status', isEqualTo: status)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) =>
+              snapshot.docs.map((doc) => _organizationFromDoc(doc)).toList(),
+        );
+  }
+
+  /// 全団体を取得（管理画面用・作成日時降順）
+  Stream<List<Organization>> getAllOrganizationsForAdmin() {
+    return _db
+        .collection('organizations')
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) =>
+              snapshot.docs.map((doc) => _organizationFromDoc(doc)).toList(),
+        );
+  }
+
+  /// 団体ステータスを更新（管理者用）
+  Future<void> updateOrganizationStatus(String orgId, String status) async {
+    final data = <String, dynamic>{'status': status};
+    if (status == 'verified') {
+      data['verifiedAt'] = FieldValue.serverTimestamp();
+    }
+    await _db.collection('organizations').doc(orgId).update(data);
+  }
+
   // ─── スカウト（Scouts） ───
 
   /// 特定ユーザー宛のスカウトを取得

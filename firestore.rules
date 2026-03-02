@@ -13,6 +13,11 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isAdmin() {
+      return isAuthenticated() &&
+        request.auth.token.email in ['admin@dscout.app'];
+    }
+
     // 呼び出し元の団体が審査承認済みかチェック
     function isVerifiedOrg() {
       return isAuthenticated() &&
@@ -34,25 +39,25 @@ service cloud.firestore {
     }
 
     match /organizations/{docId} {
-      // 承認済みの団体は誰でも閲覧可能。申請中/却下は作成者本人のみ。
-      allow read: if isAuthenticated() && (
-        resource.data.status == 'verified' || 
+      // 個別ドキュメント取得: 承認済みは誰でも、申請中/却下は作成者本人 or 管理者
+      allow get: if isAdmin() || (isAuthenticated() && (
+        resource.data.status == 'verified' ||
         isOwner(resource.data.representativeId) ||
         isOwner(docId) // 後方互換性：docIdがUIDの場合
-      );
-      
+      ));
+      // コレクションクエリ: 承認済み団体の一覧は全認証ユーザー、全件は管理者のみ
+      allow list: if isAdmin() || isAuthenticated();
+
       // 作成は認証済みユーザーなら誰でも可能だが、初期ステータスは pending 固定
-      allow create: if isAuthenticated() && 
+      allow create: if isAuthenticated() &&
                     request.resource.data.status == 'pending' &&
                     request.resource.data.representativeId == request.auth.uid;
-      
-      // 更新制限：statusフィールドの変更は管理人のみ、それ以外はオーナーが自在に変更可能
-      // ※簡易的な管理人判定がないため、statusを変更していない場合のみオーナーに許可
-      allow update: if (isOwner(resource.data.representativeId) || isOwner(docId)) &&
-                    (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) == false || 
-                     request.resource.data.status == resource.data.status);
-      
-      // 管理者（手動コンソール操作）は全権限を持つため、ルール上は記述不要
+
+      // 更新：管理者はステータス変更可能、オーナーはステータス以外を変更可能
+      allow update: if isAdmin() ||
+                    ((isOwner(resource.data.representativeId) || isOwner(docId)) &&
+                    (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) == false ||
+                     request.resource.data.status == resource.data.status));
     }
 
     // ==========================================================
