@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
+import '../services/auth_notifier.dart';
 import '../services/firestore_service.dart';
 import '../models/user_profile.dart';
 import '../models/event.dart';
@@ -39,15 +41,8 @@ class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
         elevation: 0,
         actions: [
           IconButton(
-            onPressed: () async {
-              await FirebaseAuth.instance.signOut();
-              if (context.mounted) {
-                Navigator.pushNamedAndRemoveUntil(
-                  context,
-                  '/',
-                  (route) => false,
-                );
-              }
+            onPressed: () {
+              context.read<AuthNotifier>().signOut();
             },
             icon: const Icon(Icons.logout, color: AppTheme.textSecondary),
           ),
