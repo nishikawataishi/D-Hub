@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:provider/provider.dart';
 import 'firebase_options.dart';
@@ -16,13 +18,17 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  if (kDebugMode) {
+  // エミュレータ接続: --dart-define=USE_EMULATOR=true のときのみ有効
+  const useEmulator = bool.fromEnvironment('USE_EMULATOR');
+  if (useEmulator) {
     try {
       const host = 'localhost';
+      FirebaseFirestore.instance.useFirestoreEmulator(host, 8080);
+      FirebaseAuth.instance.useAuthEmulator(host, 9099);
       FirebaseFunctions.instance.useFunctionsEmulator(host, 5001);
-      debugPrint('Cloud Functions Emulator configured to use $host:5001');
+      debugPrint('Firebase Emulators configured (Firestore:8080, Auth:9099, Functions:5001)');
     } catch (e) {
-      debugPrint('Failed to configure Cloud Functions Emulator: $e');
+      debugPrint('Failed to configure Emulators: $e');
     }
   }
 

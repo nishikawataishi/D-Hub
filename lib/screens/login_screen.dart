@@ -65,8 +65,8 @@ class _LoginScreenState extends State<LoginScreen> {
       result = await authNotifier.signIn(email: email, password: password);
     }
 
-    setState(() => _isLoading = false);
     if (!mounted) return;
+    setState(() => _isLoading = false);
 
     if (result.isSuccess) {
       // 成功時、手動での画面遷移は行わない。
