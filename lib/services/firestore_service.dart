@@ -14,7 +14,10 @@ class FirestoreService {
   Future<Organization?> getOrganization(String id) async {
     final doc = await _db.collection('organizations').doc(id).get();
     if (!doc.exists) return null;
-    return Organization.fromJson(doc.data() as Map<String, dynamic>, doc.id);
+    return Organization.fromFirestore(
+      doc.data() as Map<String, dynamic>,
+      doc.id,
+    );
   }
 
   /// 団体情報を保存
@@ -47,7 +50,7 @@ class FirestoreService {
         .snapshots()
         .map(
           (snapshot) => snapshot.docs
-              .map((doc) => Organization.fromJson(doc.data(), doc.id))
+              .map((doc) => Organization.fromFirestore(doc.data(), doc.id))
               .toList(),
         );
   }
@@ -57,7 +60,10 @@ class FirestoreService {
     if (!doc.exists || doc.data() == null) {
       return Organization.empty(doc.id);
     }
-    return Organization.fromJson(doc.data() as Map<String, dynamic>, doc.id);
+    return Organization.fromFirestore(
+      doc.data() as Map<String, dynamic>,
+      doc.id,
+    );
   }
 
   // ─── スカウト（Scouts） ───

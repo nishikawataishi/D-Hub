@@ -223,8 +223,8 @@ return $default(_that.id,_that.name,_that.description,_that.categories,_that.cam
 /// @nodoc
 @JsonSerializable()
 
-class _Organization implements Organization {
-  const _Organization({required this.id, required this.name, required this.description, required final  List<OrgCategory> categories, required this.campus, required this.logoEmoji, this.instagramUrl = '', this.logoUrl, this.representativeId, this.status = 'pending', this.proofImageUrl, this.verifiedAt, this.isOfficial = false, this.createdAt}): _categories = categories;
+class _Organization extends Organization {
+  const _Organization({required this.id, required this.name, required this.description, required final  List<OrgCategory> categories, required this.campus, required this.logoEmoji, this.instagramUrl = '', this.logoUrl, this.representativeId, this.status = 'pending', this.proofImageUrl, this.verifiedAt, this.isOfficial = false, this.createdAt}): _categories = categories,super._();
   factory _Organization.fromJson(Map<String, dynamic> json) => _$OrganizationFromJson(json);
 
 @override final  String id;

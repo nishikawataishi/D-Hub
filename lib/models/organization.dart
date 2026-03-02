@@ -39,7 +39,9 @@ enum OrgCategory {
 }
 
 @freezed
-class Organization with _$Organization {
+abstract class Organization with _$Organization {
+  const Organization._();
+
   const factory Organization({
     required String id,
     required String name,
