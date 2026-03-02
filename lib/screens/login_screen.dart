@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
+import '../services/auth_notifier.dart';
 import '../services/auth_service.dart';
 
 /// ログイン画面
@@ -15,7 +17,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _authService = AuthService();
   bool _isPasswordVisible = false;
   bool _isLoading = false;
   bool _isSignUpMode = false;
@@ -49,18 +50,19 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() => _isLoading = true);
 
+    final authNotifier = context.read<AuthNotifier>();
     final email = _emailController.text;
     final password = _passwordController.text;
 
     AuthResult result;
     if (_isSignUpMode) {
-      result = await _authService.signUp(
+      result = await authNotifier.signUp(
         email: email,
         password: password,
         isOrganization: _isOrganizationMode,
       );
     } else {
-      result = await _authService.signIn(email: email, password: password);
+      result = await authNotifier.signIn(email: email, password: password);
     }
 
     setState(() => _isLoading = false);
@@ -68,9 +70,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (result.isSuccess) {
       // 成功時、手動での画面遷移は行わない。
-      // Firebase Authのストリームを監視している main.dart の AuthGate に遷移を任せる。
+      // AuthNotifierの状態変更 → AuthGate (Consumer) が自動的に画面を切り替える。
       if (_isSignUpMode) {
-        // 新規作成時のみ案内メッセージを表示
         if (_isOrganizationMode) {
           _showMessage('団体アカウントを作成しました。', isError: false);
         } else {
@@ -93,7 +94,8 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     setState(() => _isLoading = true);
-    final result = await _authService.sendPasswordReset(email);
+    final authNotifier = context.read<AuthNotifier>();
+    final result = await authNotifier.sendPasswordReset(email);
     setState(() => _isLoading = false);
 
     if (!mounted) return;

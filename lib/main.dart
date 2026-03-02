@@ -1,17 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:provider/provider.dart';
 import 'firebase_options.dart';
 import 'theme/app_theme.dart';
 import 'screens/login_screen.dart';
 import 'screens/main_screen.dart';
 import 'screens/student_verify_screen.dart';
 import 'screens/org_dashboard_screen.dart';
-import 'services/auth_service.dart';
-import 'services/firestore_service.dart';
+import 'services/auth_notifier.dart';
 
 /// D.scout アプリのエントリーポイント
 void main() async {
@@ -20,8 +18,6 @@ void main() async {
 
   if (kDebugMode) {
     try {
-      // Android Emulatorの場合は '10.0.2.2'、iOS/Webの場合は 'localhost' に適宜変更してください。
-      // 実機テストの場合はPCのローカルIPアドレスを設定します。
       const host = 'localhost';
       FirebaseFunctions.instance.useFunctionsEmulator(host, 5001);
       debugPrint('Cloud Functions Emulator configured to use $host:5001');
@@ -30,7 +26,12 @@ void main() async {
     }
   }
 
-  runApp(const DScoutApp());
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => AuthNotifier(),
+      child: const DScoutApp(),
+    ),
+  );
 }
 
 /// アプリケーションルート
@@ -55,99 +56,82 @@ class DScoutApp extends StatelessWidget {
 }
 
 /// 認証状態を監視し、画面を切り替える
-/// 未ログイン → ログイン画面
-/// ログイン済み＆学生未認証 → 学生認証画面
-/// ログイン済み＆学生認証済み → メイン画面
-class AuthGate extends StatefulWidget {
+/// AuthNotifier (ChangeNotifier) の AuthStatus に応じて適切な画面を返す。
+/// StreamBuilder + FutureBuilder のキャッシュ問題・レースコンディションを
+/// Provider パターンで根本的に解消。
+class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
 
   @override
-  State<AuthGate> createState() => _AuthGateState();
-}
-
-class _AuthGateState extends State<AuthGate> {
-  final _authService = AuthService();
-  final _firestoreService = FirestoreService();
-
-  Future<Map<String, dynamic>> _checkUserStatus(String uid) async {
-    // データ登録までにラグがある可能性を考慮して最大10回（計5秒）リトライする
-    for (int i = 0; i < 10; i++) {
-      // 団体アカウントかチェック
-      try {
-        final isOrg = await _firestoreService.getOrganization(uid) != null;
-        if (isOrg) {
-          return {'isOrg': true, 'isVerified': false};
+  Widget build(BuildContext context) {
+    return Consumer<AuthNotifier>(
+      builder: (context, auth, _) {
+        switch (auth.status) {
+          case AuthStatus.unknown:
+          case AuthStatus.loading:
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          case AuthStatus.unauthenticated:
+            return const LoginScreen();
+          case AuthStatus.studentUnverified:
+            return const StudentVerifyScreen();
+          case AuthStatus.studentVerified:
+            return const MainScreen();
+          case AuthStatus.organization:
+            return const OrgDashboardScreen();
+          case AuthStatus.error:
+            return _buildErrorScreen(context, auth);
         }
-      } catch (e) {
-        // 例外時は無視して続行
-      }
-
-      // 一般ユーザーのドキュメントが存在するかチェック（学生認証フラグ取得のため）
-      try {
-        final doc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(uid)
-            .get();
-        if (doc.exists) {
-          final isVerified = await _authService.isStudentVerified();
-          return {'isOrg': false, 'isVerified': isVerified};
-        }
-      } catch (e) {
-        // 例外時は無視してリトライ
-      }
-
-      // どちらのデータも見つからない場合は作成中とみなして待機
-      if (i < 9) await Future.delayed(const Duration(milliseconds: 500));
-    }
-
-    // タイムアウトした場合はデフォルトで未認証の学生として扱う（フェイルセーフ）
-    return {'isOrg': false, 'isVerified': false};
+      },
+    );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
-      builder: (context, snapshot) {
-        // 読み込み中
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
-
-        // 未ログイン → ログイン画面
-        if (!snapshot.hasData) {
-          return const LoginScreen();
-        }
-
-        // ログイン済み → 学生認証チェック
-        // 毎回新しいFutureを生成してキャッシュを防ぐ
-        return FutureBuilder<Map<String, dynamic>>(
-          key: ValueKey(snapshot.data?.uid),
-          future: _checkUserStatus(snapshot.data!.uid),
-          builder: (context, statusSnapshot) {
-            if (statusSnapshot.connectionState == ConnectionState.waiting) {
-              return const Scaffold(
-                body: Center(child: CircularProgressIndicator()),
-              );
-            }
-
-            final status = statusSnapshot.data;
-            if (status?['isOrg'] == true) {
-              return const OrgDashboardScreen();
-            }
-
-            // 学生認証済み → メイン画面
-            if (status?['isVerified'] == true) {
-              return const MainScreen();
-            }
-
-            // 学生未認証 → 学生認証画面
-            return const StudentVerifyScreen();
-          },
-        );
-      },
+  Widget _buildErrorScreen(BuildContext context, AuthNotifier auth) {
+    return Scaffold(
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.error_outline,
+                size: 64,
+                color: Colors.red,
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'アカウント情報の取得に失敗しました',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'ネットワーク接続を確認して\nもう一度お試しください',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () => auth.retry(),
+                child: const Text('再試行'),
+              ),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: () => auth.signOut(),
+                child: const Text('ログアウト'),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

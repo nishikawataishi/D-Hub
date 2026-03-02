@@ -2,12 +2,11 @@ import 'dart:math';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
-import '../models/organization.dart';
 
-/// Firebase Authentication + 学生認証（2層）の認証サービス
+/// 学生認証（2層認証の第2層）の認証サービス
 ///
-/// 第1層: Firebase Auth（普通のメールでログイン）
-/// 第2層: 大学メールへの確認コード送信（1回だけ）
+/// 第1層（Firebase Auth: signUp/signIn/signOut）は AuthNotifier に移動済み。
+/// このクラスは大学メールへの確認コード送信・検証のみを担当する。
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -18,67 +17,6 @@ class AuthService {
     r'^[a-zA-Z0-9._%+-]+@(mail\d*\.doshisha\.ac\.jp|dwc\.doshisha\.ac\.jp)$',
     caseSensitive: false,
   );
-
-  /// 現在のユーザーを取得
-  User? get currentUser => _auth.currentUser;
-
-  /// 認証状態のストリーム（ログイン/ログアウトを監視）
-  Stream<User?> get authStateChanges => _auth.authStateChanges();
-
-  // ─── 第1層: アカウント認証（Firebase Auth） ───
-
-  /// 新規登録（メール + パスワード）
-  /// どのメールアドレスでもOK（Gmail, Yahoo等）
-  Future<AuthResult> signUp({
-    required String email,
-    required String password,
-    bool isOrganization = false, // 団体アカウント登録フラグ
-  }) async {
-    try {
-      await _auth.createUserWithEmailAndPassword(
-        email: email.trim(),
-        password: password,
-      );
-
-      // Firestoreにユーザードキュメントを作成
-      await _createUserDocument(isOrganization: isOrganization);
-
-      return AuthResult.success('アカウントを作成しました');
-    } on FirebaseAuthException catch (e) {
-      return AuthResult.failure(_mapFirebaseError(e.code));
-    }
-  }
-
-  /// ログイン（メール + パスワード）
-  Future<AuthResult> signIn({
-    required String email,
-    required String password,
-  }) async {
-    try {
-      await _auth.signInWithEmailAndPassword(
-        email: email.trim(),
-        password: password,
-      );
-      return AuthResult.success('ログインしました');
-    } on FirebaseAuthException catch (e) {
-      return AuthResult.failure(_mapFirebaseError(e.code));
-    }
-  }
-
-  /// ログアウト
-  Future<void> signOut() async {
-    await _auth.signOut();
-  }
-
-  /// パスワードリセットメールを送信
-  Future<AuthResult> sendPasswordReset(String email) async {
-    try {
-      await _auth.sendPasswordResetEmail(email: email.trim());
-      return AuthResult.success('パスワードリセットメールを送信しました。\nメールを確認してください。');
-    } on FirebaseAuthException catch (e) {
-      return AuthResult.failure(_mapFirebaseError(e.code));
-    }
-  }
 
   // ─── 第2層: 学生認証（大学メール確認コード） ───
 
@@ -101,9 +39,7 @@ class AuthService {
     }
   }
 
-  /// 確認コードを生成し、Firestoreに保存
-  /// 実際にはメール送信はバックエンドで行うが、
-  /// MVP段階ではFirestoreにコードを保存しSnackBarで表示する
+  /// 確認コードを生成し、Firestoreに保存してCloud Functionsで送信
   Future<AuthResult> sendVerificationCode(String universityEmail) async {
     final user = _auth.currentUser;
     if (user == null) {
@@ -194,74 +130,10 @@ class AuthService {
 
   // ─── ユーティリティ ───
 
-  /// Firestoreにユーザードキュメントを作成
-  /// 注意: 団体アカウントフラグ (isOrganization) がtrue、
-  /// またはいままでの暫定対応として 'admin@' パターンを含む場合
-  Future<void> _createUserDocument({bool isOrganization = false}) async {
-    final user = _auth.currentUser;
-    if (user == null) return;
-
-    if (isOrganization ||
-        (user.email != null && user.email!.contains('admin@'))) {
-      // 団体アカウントとして作成
-      final doc = await _firestore
-          .collection('organizations')
-          .doc(user.uid)
-          .get();
-      if (!doc.exists) {
-        final mockOrg = Organization.empty(user.uid);
-        // 新規登録直後のため、ダミーの団体名を入れて後から編集させる想定
-        await _firestore
-            .collection('organizations')
-            .doc(user.uid)
-            .set(
-              mockOrg.toJson()
-                ..addAll({'createdAt': FieldValue.serverTimestamp()}),
-            );
-      }
-    } else {
-      // 学生アカウントの初期化
-      final doc = await _firestore.collection('users').doc(user.uid).get();
-      if (!doc.exists) {
-        await _firestore.collection('users').doc(user.uid).set({
-          'email': user.email,
-          'isStudentVerified': false,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-      }
-    }
-  }
-
   /// 6桁のランダム確認コードを生成
   String _generateVerificationCode() {
     final random = Random.secure();
     return (100000 + random.nextInt(900000)).toString();
-  }
-
-  /// Firebaseのエラーコードを日本語メッセージに変換
-  String _mapFirebaseError(String code) {
-    switch (code) {
-      case 'email-already-in-use':
-        return 'このメールアドレスは既に登録されています';
-      case 'invalid-email':
-        return 'メールアドレスの形式が正しくありません';
-      case 'user-not-found':
-        return 'このメールアドレスは登録されていません';
-      case 'wrong-password':
-        return 'パスワードが間違っています';
-      case 'invalid-credential':
-        return 'メールアドレスまたはパスワードが間違っています';
-      case 'weak-password':
-        return 'パスワードが弱すぎます。6文字以上にしてください';
-      case 'too-many-requests':
-        return 'ログイン試行回数が多すぎます。\nしばらくしてからお試しください';
-      case 'user-disabled':
-        return 'このアカウントは無効化されています';
-      case 'network-request-failed':
-        return 'ネットワーク接続を確認してください';
-      default:
-        return 'エラーが発生しました（$code）';
-    }
   }
 }
 

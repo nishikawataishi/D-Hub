@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../services/auth_service.dart';
+import '../services/auth_notifier.dart';
 
 /// 学生認証画面（2層認証の第2層）
 /// 同志社・同女の大学メールに確認コードを送信して学生であることを証明する
@@ -58,10 +60,10 @@ class _StudentVerifyScreenState extends State<StudentVerifyScreen> {
 
     if (result.isSuccess) {
       _showMessage(result.message, isError: false);
-      // 学生認証完了 → メイン画面へ遷移
+      // 学生認証完了 → AuthNotifierの状態を更新し、AuthGateがMainScreenに切り替える
       await Future.delayed(const Duration(milliseconds: 500));
       if (context.mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+        context.read<AuthNotifier>().completeVerification();
       }
     } else {
       _showMessage(result.message, isError: true);
@@ -96,15 +98,8 @@ class _StudentVerifyScreenState extends State<StudentVerifyScreen> {
         actions: [
           // ログアウトボタン
           TextButton(
-            onPressed: () async {
-              await _authService.signOut();
-              if (context.mounted) {
-                Navigator.pushNamedAndRemoveUntil(
-                  context,
-                  '/',
-                  (route) => false,
-                );
-              }
+            onPressed: () {
+              context.read<AuthNotifier>().signOut();
             },
             child: const Text(
               'ログアウト',

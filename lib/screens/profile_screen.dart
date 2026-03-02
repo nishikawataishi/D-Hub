@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import '../services/auth_service.dart';
+import 'package:provider/provider.dart';
+import '../services/auth_notifier.dart';
 import '../services/firestore_service.dart';
 import '../models/campus.dart';
 import '../models/user_profile.dart';
@@ -18,7 +19,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   bool _isEditingTags = false;
   final _tagController = TextEditingController();
-  final _authService = AuthService();
+
   final _firestoreService = FirestoreService();
 
   /// タグの追加
@@ -53,7 +54,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final user = _authService.currentUser;
+    final user = context.read<AuthNotifier>().user;
     if (user == null) {
       return const Center(child: Text('ログインしていません'));
     }
@@ -326,14 +327,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               );
               if (confirmed == true && context.mounted) {
-                await _authService.signOut();
-                if (context.mounted) {
-                  Navigator.pushNamedAndRemoveUntil(
-                    context,
-                    '/',
-                    (route) => false,
-                  );
-                }
+                context.read<AuthNotifier>().signOut();
               }
             },
             isDestructive: true,
