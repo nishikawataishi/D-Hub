@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
@@ -147,6 +148,7 @@ class EventScreen extends StatelessWidget {
                         description: event.description,
                         orgName: event.organization.name,
                         orgEmoji: event.organization.logoEmoji,
+                        orgLogoUrl: event.organizationLogoUrl,
                         startAt: startAt,
                         campus: campus,
                         campusColor: _campusColor(campus),
@@ -214,6 +216,7 @@ class _EventCard extends StatelessWidget {
   final String description;
   final String orgName;
   final String orgEmoji;
+  final String? orgLogoUrl;
   final DateTime startAt;
   final Campus campus;
   final Color campusColor;
@@ -225,6 +228,7 @@ class _EventCard extends StatelessWidget {
     required this.description,
     required this.orgName,
     required this.orgEmoji,
+    this.orgLogoUrl,
     required this.startAt,
     required this.campus,
     required this.campusColor,
@@ -307,7 +311,16 @@ class _EventCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      Text(orgEmoji, style: const TextStyle(fontSize: 12)),
+                      if (orgLogoUrl != null)
+                        CircleAvatar(
+                          radius: 7,
+                          backgroundColor: Colors.transparent,
+                          backgroundImage: CachedNetworkImageProvider(
+                            orgLogoUrl!,
+                          ),
+                        )
+                      else
+                        Text(orgEmoji, style: const TextStyle(fontSize: 12)),
                       const SizedBox(width: 4),
                       Text(
                         orgName,

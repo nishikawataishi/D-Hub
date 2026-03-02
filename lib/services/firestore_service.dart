@@ -112,6 +112,7 @@ class FirestoreService {
       isRead: false,
       sentAt: now,
       organizationInstagramUrl: senderOrg.instagramUrl,
+      organizationLogoUrl: senderOrg.logoUrl,
     ).toFirestore();
 
     scoutData['sentAt'] = FieldValue.serverTimestamp();

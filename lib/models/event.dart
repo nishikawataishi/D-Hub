@@ -10,6 +10,7 @@ class Event {
   final String description;
   final DateTime startAt;
   final Campus campus;
+  final String? organizationLogoUrl;
 
   const Event({
     required this.id,
@@ -18,6 +19,7 @@ class Event {
     required this.description,
     required this.startAt,
     required this.campus,
+    this.organizationLogoUrl,
   });
 
   Event copyWith({
@@ -27,6 +29,7 @@ class Event {
     String? description,
     DateTime? startAt,
     Campus? campus,
+    String? organizationLogoUrl,
   }) {
     return Event(
       id: id ?? this.id,
@@ -35,6 +38,7 @@ class Event {
       description: description ?? this.description,
       startAt: startAt ?? this.startAt,
       campus: campus ?? this.campus,
+      organizationLogoUrl: organizationLogoUrl ?? this.organizationLogoUrl,
     );
   }
 
@@ -49,6 +53,7 @@ class Event {
         data['organizationCategory'] as String? ?? '',
       ),
       campus: Campus.both,
+      logoUrl: data['organizationLogoUrl'] as String?,
     );
 
     final startAtTimestamp = data['startAt'] as Timestamp?;
@@ -60,6 +65,7 @@ class Event {
       description: data['description'] as String? ?? '',
       startAt: startAtTimestamp?.toDate() ?? DateTime.now(),
       campus: Campus.fromString(data['campus'] as String? ?? ''),
+      organizationLogoUrl: data['organizationLogoUrl'] as String?,
     );
   }
 
@@ -73,6 +79,8 @@ class Event {
       'description': description,
       'startAt': Timestamp.fromDate(startAt),
       'campus': campus.name,
+      if (organizationLogoUrl != null)
+        'organizationLogoUrl': organizationLogoUrl,
       'updatedAt': FieldValue.serverTimestamp(),
     };
   }

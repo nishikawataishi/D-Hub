@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
@@ -211,21 +212,34 @@ class _OrganizationCard extends StatelessWidget {
                   height: 90,
                   width: double.infinity,
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        _campusColor().withValues(alpha: 0.15),
-                        _campusColor().withValues(alpha: 0.05),
-                      ],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
+                    color: AppTheme.surface,
+                    image: organization.logoUrl != null
+                        ? DecorationImage(
+                            image: CachedNetworkImageProvider(
+                              organization.logoUrl!,
+                            ),
+                            fit: BoxFit.cover,
+                          )
+                        : null,
+                    gradient: organization.logoUrl == null
+                        ? LinearGradient(
+                            colors: [
+                              _campusColor().withValues(alpha: 0.15),
+                              _campusColor().withValues(alpha: 0.05),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          )
+                        : null,
                   ),
-                  child: Center(
-                    child: Text(
-                      organization.logoEmoji,
-                      style: const TextStyle(fontSize: 36),
-                    ),
-                  ),
+                  child: organization.logoUrl == null
+                      ? Center(
+                          child: Text(
+                            organization.logoEmoji,
+                            style: const TextStyle(fontSize: 36),
+                          ),
+                        )
+                      : null,
                 ),
                 // キャンパスバッジ
                 Positioned(

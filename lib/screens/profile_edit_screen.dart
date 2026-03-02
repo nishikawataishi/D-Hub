@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -92,35 +93,37 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     try {
       final picker = ImagePicker();
       final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-      if (pickedFile == null) return;
+      if (!mounted || pickedFile == null) return;
 
-      final croppedFile = await ImageCropper().cropImage(
-        sourcePath: pickedFile.path,
-        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
-        uiSettings: [
-          AndroidUiSettings(
-            toolbarTitle: '画像のトリミング',
-            toolbarColor: AppTheme.primary,
-            toolbarWidgetColor: Colors.white,
-            initAspectRatio: CropAspectRatioPreset.square,
-            lockAspectRatio: true,
-          ),
-          IOSUiSettings(title: '画像のトリミング', aspectRatioLockEnabled: true),
-          WebUiSettings(
-            context: context,
-            presentStyle: WebPresentStyle.dialog,
-            size: const CropperSize(width: 400, height: 400),
-          ),
-        ],
-      );
+      late XFile finalFile;
 
-      if (croppedFile == null) return;
+      if (kIsWeb) {
+        finalFile = pickedFile;
+      } else {
+        final croppedFile = await ImageCropper().cropImage(
+          sourcePath: pickedFile.path,
+          aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+          uiSettings: [
+            AndroidUiSettings(
+              toolbarTitle: '画像のトリミング',
+              toolbarColor: AppTheme.primary,
+              toolbarWidgetColor: Colors.white,
+              initAspectRatio: CropAspectRatioPreset.square,
+              lockAspectRatio: true,
+            ),
+            IOSUiSettings(title: '画像のトリミング', aspectRatioLockEnabled: true),
+          ],
+        );
+
+        if (croppedFile == null) return;
+        finalFile = XFile(croppedFile.path);
+      }
 
       setState(() => _isUploadingImage = true);
 
       final url = await StorageService().uploadUserIcon(
         userId: widget.profile.id,
-        file: XFile(croppedFile.path),
+        file: finalFile,
       );
 
       if (url != null) {

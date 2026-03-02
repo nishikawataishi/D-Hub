@@ -155,6 +155,7 @@ class _EventEditScreenState extends State<EventEditScreen> {
           description: _descriptionController.text.trim(),
           startAt: startAt,
           campus: _selectedCampus,
+          organizationLogoUrl: _currentOrg!.logoUrl,
         );
         await _firestoreService.createEvent(newEvent);
         if (mounted) {
@@ -170,6 +171,7 @@ class _EventEditScreenState extends State<EventEditScreen> {
           description: _descriptionController.text.trim(),
           startAt: startAt,
           campus: _selectedCampus,
+          organizationLogoUrl: _currentOrg?.logoUrl,
         );
         await _firestoreService.updateEvent(updatedEvent);
         if (mounted) {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
@@ -209,30 +210,33 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
     try {
       final picker = ImagePicker();
       final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-      if (pickedFile == null) return;
+      if (!mounted || pickedFile == null) return;
 
-      // Crop image
-      final croppedFile = await ImageCropper().cropImage(
-        sourcePath: pickedFile.path,
-        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
-        uiSettings: [
-          AndroidUiSettings(
-            toolbarTitle: '画像のトリミング',
-            toolbarColor: AppTheme.primary,
-            toolbarWidgetColor: Colors.white,
-            initAspectRatio: CropAspectRatioPreset.square,
-            lockAspectRatio: true,
-          ),
-          IOSUiSettings(title: '画像のトリミング', aspectRatioLockEnabled: true),
-          WebUiSettings(
-            context: context,
-            presentStyle: WebPresentStyle.dialog,
-            size: const CropperSize(width: 400, height: 400),
-          ),
-        ],
-      );
+      late XFile finalFile;
 
-      if (croppedFile == null) return;
+      // Webの場合はトリミングをスキップしてそのままアップロード
+      if (kIsWeb) {
+        finalFile = pickedFile;
+      } else {
+        // Crop image (モバイル・デスクトップの場合)
+        final croppedFile = await ImageCropper().cropImage(
+          sourcePath: pickedFile.path,
+          aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+          uiSettings: [
+            AndroidUiSettings(
+              toolbarTitle: '画像のトリミング',
+              toolbarColor: AppTheme.primary,
+              toolbarWidgetColor: Colors.white,
+              initAspectRatio: CropAspectRatioPreset.square,
+              lockAspectRatio: true,
+            ),
+            IOSUiSettings(title: '画像のトリミング', aspectRatioLockEnabled: true),
+          ],
+        );
+
+        if (croppedFile == null) return;
+        finalFile = XFile(croppedFile.path);
+      }
 
       setState(() => _isUploadingImage = true);
 
@@ -240,7 +244,7 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
       if (user != null && _org != null) {
         final url = await StorageService().uploadOrgImage(
           orgId: user.uid,
-          file: XFile(croppedFile.path),
+          file: finalFile,
           isLogo: true,
         );
 

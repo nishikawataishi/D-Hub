@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
 import '../models/scout.dart';
@@ -149,6 +150,7 @@ class _ScoutTileFromMap extends StatelessWidget {
     return _buildScoutContainer(
       isRead: scout.isRead,
       orgEmoji: scout.organizationEmoji,
+      orgLogoUrl: scout.organizationLogoUrl,
       orgName: scout.organizationName,
       category: scout.organizationCategory,
       message: scout.message,
@@ -162,6 +164,7 @@ class _ScoutTileFromMap extends StatelessWidget {
 Widget _buildScoutContainer({
   required bool isRead,
   required String orgEmoji,
+  String? orgLogoUrl,
   required String orgName,
   required String category,
   required String message,
@@ -206,13 +209,21 @@ Widget _buildScoutContainer({
                     decoration: BoxDecoration(
                       color: AppTheme.primary.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
+                      image: orgLogoUrl != null
+                          ? DecorationImage(
+                              image: CachedNetworkImageProvider(orgLogoUrl),
+                              fit: BoxFit.cover,
+                            )
+                          : null,
                     ),
-                    child: Center(
-                      child: Text(
-                        orgEmoji,
-                        style: const TextStyle(fontSize: 22),
-                      ),
-                    ),
+                    child: orgLogoUrl == null
+                        ? Center(
+                            child: Text(
+                              orgEmoji,
+                              style: const TextStyle(fontSize: 22),
+                            ),
+                          )
+                        : null,
                   ),
                   if (!isRead)
                     Positioned(

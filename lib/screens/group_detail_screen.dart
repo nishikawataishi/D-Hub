@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../models/organization.dart';
 import '../models/event.dart';
 import '../theme/app_theme.dart';
@@ -41,13 +42,23 @@ class GroupDetailScreen extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: AppTheme.primary.withAlpha(25),
                   shape: BoxShape.circle,
+                  image: organization.logoUrl != null
+                      ? DecorationImage(
+                          image: CachedNetworkImageProvider(
+                            organization.logoUrl!,
+                          ),
+                          fit: BoxFit.cover,
+                        )
+                      : null,
                 ),
-                child: Center(
-                  child: Text(
-                    organization.logoEmoji,
-                    style: const TextStyle(fontSize: 50),
-                  ),
-                ),
+                child: organization.logoUrl == null
+                    ? Center(
+                        child: Text(
+                          organization.logoEmoji,
+                          style: const TextStyle(fontSize: 50),
+                        ),
+                      )
+                    : null,
               ),
             ),
             const SizedBox(height: 16),
