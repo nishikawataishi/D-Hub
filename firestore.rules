@@ -8,9 +8,15 @@ service cloud.firestore {
     function isAuthenticated() {
       return request.auth != null;
     }
-    
+
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // 呼び出し元の団体が審査承認済みかチェック
+    function isVerifiedOrg() {
+      return isAuthenticated() &&
+        get(/databases/$(database)/documents/organizations/$(request.auth.uid)).data.status == 'verified';
     }
 
     // ==========================================================
@@ -54,12 +60,12 @@ service cloud.firestore {
     // ==========================================================
     match /events/{docId} {
       allow read: if isAuthenticated();
-      // 団体UID制限: 自身のorganizationIdに紐づくイベントのみ作成・更新・削除可能
-      allow create: if isAuthenticated() && request.resource.data.organizationId == request.auth.uid;
-      allow update: if isAuthenticated() 
+      // 団体UID制限: 審査承認済みの団体のみ作成・更新・削除可能
+      allow create: if isVerifiedOrg() && request.resource.data.organizationId == request.auth.uid;
+      allow update: if isVerifiedOrg()
                     && resource.data.organizationId == request.auth.uid
                     && request.resource.data.organizationId == request.auth.uid;
-      allow delete: if isAuthenticated() && resource.data.organizationId == request.auth.uid;
+      allow delete: if isVerifiedOrg() && resource.data.organizationId == request.auth.uid;
     }
 
     // ==========================================================
@@ -74,8 +80,8 @@ service cloud.firestore {
                     && request.auth.uid == resource.data.targetUserId
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'readAt']);
       
-      // 作成は送信元の団体アカウントのみ許可
-      allow create: if isAuthenticated() 
+      // 作成は審査承認済みの団体アカウントのみ許可
+      allow create: if isVerifiedOrg()
                     && request.resource.data.organizationId == request.auth.uid;
     }
   }
