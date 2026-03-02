@@ -325,8 +325,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ],
                 ),
               );
-              if (confirmed == true && mounted) {
+              if (confirmed == true && context.mounted) {
                 await _authService.signOut();
+                if (context.mounted) {
+                  Navigator.pushNamedAndRemoveUntil(
+                    context,
+                    '/',
+                    (route) => false,
+                  );
+                }
               }
             },
             isDestructive: true,

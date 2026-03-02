@@ -1,0 +1,33 @@
+{
+    "indexes": [
+        {
+            "collectionGroup": "scouts",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "targetUserId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "sentAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "events",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "organizationId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "startAt",
+                    "order": "ASCENDING"
+                }
+            ]
+        }
+    ],
+    "fieldOverrides": []
+}

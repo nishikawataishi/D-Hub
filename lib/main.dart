@@ -70,12 +70,16 @@ class _AuthGateState extends State<AuthGate> {
   final _firestoreService = FirestoreService();
 
   Future<Map<String, dynamic>> _checkUserStatus(String uid) async {
-    // データ登録までにラグがある可能性を考慮して最大3回（計1.5秒）リトライする
-    for (int i = 0; i < 3; i++) {
+    // データ登録までにラグがある可能性を考慮して最大10回（計5秒）リトライする
+    for (int i = 0; i < 10; i++) {
       // 団体アカウントかチェック
-      final isOrg = await _firestoreService.getOrganization(uid) != null;
-      if (isOrg) {
-        return {'isOrg': true, 'isVerified': false};
+      try {
+        final isOrg = await _firestoreService.getOrganization(uid) != null;
+        if (isOrg) {
+          return {'isOrg': true, 'isVerified': false};
+        }
+      } catch (e) {
+        // 例外時は無視して続行
       }
 
       // 一般ユーザーのドキュメントが存在するかチェック（学生認証フラグ取得のため）
@@ -93,7 +97,7 @@ class _AuthGateState extends State<AuthGate> {
       }
 
       // どちらのデータも見つからない場合は作成中とみなして待機
-      if (i < 2) await Future.delayed(const Duration(milliseconds: 500));
+      if (i < 9) await Future.delayed(const Duration(milliseconds: 500));
     }
 
     // タイムアウトした場合はデフォルトで未認証の学生として扱う（フェイルセーフ）

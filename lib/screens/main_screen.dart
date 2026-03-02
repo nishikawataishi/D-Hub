@@ -53,7 +53,7 @@ class _MainScreenState extends State<MainScreen> {
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           debugPrint('Firestore Error (MainScreen): ${snapshot.error}');
-          return const SizedBox.shrink();
+          // エラー時も SizedBox.shrink() は返さず、UIはそのまま表示する（バッジは非表示扱い）
         }
 
         bool hasUnread = false;

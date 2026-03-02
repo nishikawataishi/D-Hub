@@ -276,7 +276,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             _isOrganizationMode = value;
                           });
                         },
-                        activeColor: AppTheme.primary,
+                        activeThumbColor: AppTheme.primary,
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 16,
                           vertical: 4,

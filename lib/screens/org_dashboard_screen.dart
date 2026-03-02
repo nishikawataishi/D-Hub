@@ -41,6 +41,13 @@ class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
           IconButton(
             onPressed: () async {
               await FirebaseAuth.instance.signOut();
+              if (context.mounted) {
+                Navigator.pushNamedAndRemoveUntil(
+                  context,
+                  '/',
+                  (route) => false,
+                );
+              }
             },
             icon: const Icon(Icons.logout, color: AppTheme.textSecondary),
           ),

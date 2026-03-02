@@ -60,8 +60,8 @@ class _StudentVerifyScreenState extends State<StudentVerifyScreen> {
       _showMessage(result.message, isError: false);
       // 学生認証完了 → メイン画面へ遷移
       await Future.delayed(const Duration(milliseconds: 500));
-      if (mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, '/main', (route) => false);
+      if (context.mounted) {
+        Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
       }
     } else {
       _showMessage(result.message, isError: true);
@@ -98,6 +98,13 @@ class _StudentVerifyScreenState extends State<StudentVerifyScreen> {
           TextButton(
             onPressed: () async {
               await _authService.signOut();
+              if (context.mounted) {
+                Navigator.pushNamedAndRemoveUntil(
+                  context,
+                  '/',
+                  (route) => false,
+                );
+              }
             },
             child: const Text(
               'ログアウト',
