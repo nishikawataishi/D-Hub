@@ -1,7 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-// Added for XFile
+import 'package:image_picker/image_picker.dart';
 import '../services/image_service.dart';
 import '../services/firestore_service.dart';
 import '../services/storage_service.dart';
@@ -23,7 +24,7 @@ class _OrgCreateScreenState extends State<OrgCreateScreen> {
 
   final List<OrgCategory> _selectedCategories = [];
   final Campus _selectedCampus = Campus.both;
-  File? _proofImage;
+  XFile? _proofImage;
   bool _isSubmitting = false;
 
   @override
@@ -36,7 +37,7 @@ class _OrgCreateScreenState extends State<OrgCreateScreen> {
   Future<void> _pickProofImage() async {
     final xFile = await ImageService().pickAndProcessImage();
     if (xFile != null) {
-      setState(() => _proofImage = File(xFile.path));
+      setState(() => _proofImage = xFile);
     }
   }
 
@@ -234,7 +235,15 @@ class _OrgCreateScreenState extends State<OrgCreateScreen> {
                   child: _proofImage != null
                       ? ClipRRect(
                           borderRadius: BorderRadius.circular(12),
-                          child: Image.file(_proofImage!, fit: BoxFit.cover),
+                          child: kIsWeb
+                              ? Image.network(
+                                  _proofImage!.path,
+                                  fit: BoxFit.cover,
+                                )
+                              : Image.file(
+                                  File(_proofImage!.path),
+                                  fit: BoxFit.cover,
+                                ),
                         )
                       : const Column(
                           mainAxisAlignment: MainAxisAlignment.center,
