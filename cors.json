@@ -1,7 +1,8 @@
 [
     {
         "origin": [
-            "*"
+            "https://d-scout-6d281.web.app",
+            "https://d-scout-6d281.firebaseapp.com"
         ],
         "method": [
             "GET"

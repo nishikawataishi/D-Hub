@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../data/mock_data.dart';
@@ -126,22 +127,16 @@ class FirestoreService {
     });
   }
 
-  /// スカウトを送信する
+  /// スカウトを送信する（トランザクションで重複チェック + 作成をアトミックに実行）
   Future<void> sendScout({
     required String targetUserId,
     required Organization senderOrg,
     required String message,
   }) async {
-    // 重複送信のチェック: 同じ学生に未読のスカウトが既にある場合はエラー
-    final existingScouts = await _db
-        .collection('scouts')
-        .where('targetUserId', isEqualTo: targetUserId)
-        .where('organizationId', isEqualTo: senderOrg.id)
-        .where('isRead', isEqualTo: false)
-        .get();
-
-    if (existingScouts.docs.isNotEmpty) {
-      throw Exception('すでにこの学生には未読のスカウトを送信済みです。');
+    // メッセージ長バリデーション（Firestoreルールと一致）
+    final trimmedMessage = message.trim();
+    if (trimmedMessage.isEmpty || trimmedMessage.length > 500) {
+      throw Exception('メッセージは1〜500文字で入力してください。');
     }
 
     // 学生の情報を取得してアイコンURLを保持
@@ -149,7 +144,7 @@ class FirestoreService {
 
     final now = DateTime.now();
     final scoutData = Scout(
-      id: '', // Firestoreが自動生成するため空でOKだが、toFirestoreでは保存されない
+      id: '',
       targetUserId: targetUserId,
       organizationId: senderOrg.id,
       organizationName: senderOrg.name,
@@ -157,7 +152,7 @@ class FirestoreService {
       organizationCategory: senderOrg.categories.isNotEmpty
           ? senderOrg.categories.first.label
           : OrgCategory.all.label,
-      message: message,
+      message: trimmedMessage,
       isRead: false,
       sentAt: now,
       organizationInstagramUrl: senderOrg.instagramUrl,
@@ -167,7 +162,22 @@ class FirestoreService {
 
     scoutData['sentAt'] = FieldValue.serverTimestamp();
 
-    await _db.collection('scouts').add(scoutData);
+    // トランザクションで重複チェック + 作成をアトミックに実行
+    await _db.runTransaction((transaction) async {
+      final existingScouts = await _db
+          .collection('scouts')
+          .where('targetUserId', isEqualTo: targetUserId)
+          .where('organizationId', isEqualTo: senderOrg.id)
+          .where('isRead', isEqualTo: false)
+          .get();
+
+      if (existingScouts.docs.isNotEmpty) {
+        throw Exception('すでにこの学生には未読のスカウトを送信済みです。');
+      }
+
+      final newDocRef = _db.collection('scouts').doc();
+      transaction.set(newDocRef, scoutData);
+    });
   }
 
   // ─── イベント（Events） ───
@@ -269,7 +279,11 @@ class FirestoreService {
   // ─── 初期データ投入（開発用） ───
 
   /// モックデータをFirestoreに投入する（1回だけ実行する開発用関数）
+  /// 本番環境では実行不可
   Future<void> seedData() async {
+    if (!kDebugMode) {
+      throw StateError('seedData()はデバッグモードでのみ実行可能です');
+    }
     final batch = _db.batch();
     final user = _auth.currentUser;
 

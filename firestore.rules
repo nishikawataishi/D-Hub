@@ -28,12 +28,15 @@ service cloud.firestore {
     // users コレクション
     // ==========================================================
     match /users/{userId} {
-      // 本人は読み込み可能。加えて団体（OrgDashboard用）は他ユーザーの公開プロフを検索・閲覧可能とする
-      allow read: if isAuthenticated();
-      // list を特別に許可 (OrgDashboardが getStudents() で name isNotEqualTo null で引っ張ってくるため)
-      allow list: if isAuthenticated();
-      // updateは本人のみ可能。isStudentVerified等は直接変更させないようなバリデーションなどが必要だが、MVPなので一旦本人許可
-      allow update: if isOwner(userId);
+      // 本人・承認済み団体・管理者のみ閲覧可能
+      allow get: if isOwner(userId) || isVerifiedOrg() || isAdmin();
+      allow list: if isVerifiedOrg() || isAdmin();
+      // updateは本人のみ可能。ただしサーバー管理フィールドは変更不可
+      allow update: if isOwner(userId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(
+          ['isStudentVerified', 'verificationCode', 'codeExpiresAt', 'verifiedAt',
+           'verificationAttempts', 'lastCodeSentAt', 'codeHashedValue']
+        );
       allow create: if isOwner(userId);
       allow delete: if isOwner(userId);
     }
@@ -77,17 +80,24 @@ service cloud.firestore {
     // scouts コレクション
     // ==========================================================
     match /scouts/{docId} {
-      // 読み取りはスカウトされた本人、及び送信元の団体ユーザー（MVPでは全員に仮許可）
-      allow read: if isAuthenticated();
-      
-      // 更新（既読フラグなど）は本人のみ、かつisReadとreadAtのみ更新可能
-      allow update: if isAuthenticated() 
+      // 読み取りはスカウト対象の学生、または送信元の団体のみ
+      allow get: if isAuthenticated() &&
+        (request.auth.uid == resource.data.targetUserId ||
+         request.auth.uid == resource.data.organizationId);
+      // listクエリはwhere条件でtargetUserIdまたはorganizationIdが自分のUIDである必要がある
+      allow list: if isAuthenticated();
+
+      // 更新（既読フラグなど）は対象学生のみ、かつisReadとreadAtのみ更新可能
+      allow update: if isAuthenticated()
                     && request.auth.uid == resource.data.targetUserId
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'readAt']);
-      
-      // 作成は審査承認済みの団体アカウントのみ許可
+
+      // 作成は審査承認済みの団体のみ。メッセージは1〜500文字
       allow create: if isVerifiedOrg()
-                    && request.resource.data.organizationId == request.auth.uid;
+                    && request.resource.data.organizationId == request.auth.uid
+                    && request.resource.data.message is string
+                    && request.resource.data.message.size() > 0
+                    && request.resource.data.message.size() <= 500;
     }
   }
 }
