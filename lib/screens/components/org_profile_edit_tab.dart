@@ -7,6 +7,7 @@ import '../../models/organization.dart';
 import '../../models/campus.dart';
 import '../../theme/app_theme.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'photo_gallery_editor.dart';
 
 class OrgProfileEditTab extends StatefulWidget {
   const OrgProfileEditTab({super.key});
@@ -26,6 +27,8 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
   bool _isUploadingImage = false;
   List<OrgCategory> _selectedCategories = [];
   Campus _selectedCampus = Campus.both;
+  List<String> _photoUrls = [];
+  final Set<int> _uploadingPhotoIndices = {};
 
   @override
   void initState() {
@@ -48,6 +51,7 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
           _instaController.text = org.instagramUrl;
           _selectedCategories = List.from(org.categories);
           _selectedCampus = org.campus;
+          _photoUrls = List<String>.from(org.photoUrls);
           _isLoading = false;
         });
         return;
@@ -115,6 +119,14 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
                         ),
                       ],
                     ),
+            ),
+            const SizedBox(height: 24),
+            // プロフィール写真ギャラリー編集
+            PhotoGalleryEditor(
+              photoUrls: _photoUrls,
+              uploadingIndices: _uploadingPhotoIndices,
+              onAddPhoto: _pickAndUploadPhoto,
+              onRemovePhoto: _removePhoto,
             ),
             const SizedBox(height: 32),
             _buildSectionTitle('基本情報'),
@@ -266,6 +278,58 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
     );
   }
 
+  Future<void> _pickAndUploadPhoto(int index) async {
+    try {
+      setState(() => _uploadingPhotoIndices.add(index));
+
+      final finalFile = await ImageService().pickAndProcessImage(
+        maxWidth: 1024,
+        maxHeight: 1024,
+        aspectRatio: null,
+        crop: false,
+      );
+      if (!mounted || finalFile == null) {
+        setState(() => _uploadingPhotoIndices.remove(index));
+        return;
+      }
+
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      final url = await StorageService().uploadOrgPhoto(
+        orgId: user.uid,
+        file: finalFile,
+      );
+
+      if (url != null && mounted) {
+        setState(() {
+          if (index < _photoUrls.length) {
+            _photoUrls[index] = url;
+          } else {
+            _photoUrls.add(url);
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('写真のアップロードに失敗しました: $e'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _uploadingPhotoIndices.remove(index));
+    }
+  }
+
+  void _removePhoto(int index) {
+    if (index < _photoUrls.length) {
+      setState(() => _photoUrls.removeAt(index));
+    }
+  }
+
   Future<void> _pickAndUploadImage() async {
     try {
       setState(() => _isUploadingImage = true);
@@ -297,6 +361,7 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
             logoEmoji: _org!.logoEmoji,
             instagramUrl: _org!.instagramUrl,
             logoUrl: url,
+            photoUrls: _photoUrls,
           );
           await FirestoreService().saveOrganization(updatedOrg);
           if (mounted) {
@@ -344,6 +409,7 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
         logoEmoji: _org!.logoEmoji,
         instagramUrl: _instaController.text.trim(),
         logoUrl: _org!.logoUrl,
+        photoUrls: _photoUrls,
       );
 
       try {

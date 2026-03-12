@@ -4,6 +4,7 @@ import '../models/organization.dart';
 import '../models/event.dart';
 import '../theme/app_theme.dart';
 import '../screens/components/verified_badge.dart';
+import 'components/photo_gallery.dart';
 import '../services/firestore_service.dart';
 import 'event_detail_screen.dart';
 
@@ -62,6 +63,11 @@ class GroupDetailScreen extends StatelessWidget {
                     : null,
               ),
             ),
+            // 写真ギャラリー
+            if (organization.photoUrls.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              PhotoGallery(photoUrls: organization.photoUrls),
+            ],
             const SizedBox(height: 16),
             Center(
               child: Row(

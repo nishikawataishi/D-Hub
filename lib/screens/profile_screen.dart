@@ -7,6 +7,7 @@ import '../models/campus.dart';
 import '../models/user_profile.dart';
 import '../theme/app_theme.dart';
 import 'profile_edit_screen.dart';
+import 'components/photo_gallery.dart';
 
 /// マイページ画面
 /// プロフィール表示、興味関心タグの編集、設定メニュー
@@ -119,25 +120,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       child: Column(
         children: [
-          // アバター
-          Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withAlpha(25),
-              shape: BoxShape.circle,
-              image: profile.iconUrl != null
-                  ? DecorationImage(
-                      image: CachedNetworkImageProvider(profile.iconUrl!),
-                      fit: BoxFit.cover,
-                    )
+          // 写真ギャラリー
+          if (profile.photoUrls.isNotEmpty) ...[
+            PhotoGallery(photoUrls: profile.photoUrls),
+            const SizedBox(height: 14),
+          ] else ...[
+            // アバター（写真がない場合のフォールバック）
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withAlpha(25),
+                shape: BoxShape.circle,
+                image: profile.iconUrl != null
+                    ? DecorationImage(
+                        image: CachedNetworkImageProvider(profile.iconUrl!),
+                        fit: BoxFit.cover,
+                      )
+                    : null,
+              ),
+              child: profile.iconUrl == null
+                  ? const Icon(Icons.person, size: 40, color: AppTheme.primary)
                   : null,
             ),
-            child: profile.iconUrl == null
-                ? const Icon(Icons.person, size: 40, color: AppTheme.primary)
-                : null,
-          ),
-          const SizedBox(height: 14),
+            const SizedBox(height: 14),
+          ],
 
           // 名前
           Text(

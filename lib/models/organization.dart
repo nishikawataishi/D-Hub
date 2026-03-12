@@ -58,6 +58,7 @@ abstract class Organization with _$Organization {
     DateTime? verifiedAt,
     @Default(false) bool isOfficial,
     DateTime? createdAt,
+    @Default([]) List<String> photoUrls,
   }) = _Organization;
 
   factory Organization.fromJson(Map<String, dynamic> json) =>
