@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:provider/provider.dart';
 import 'firebase_options.dart';
 import 'theme/app_theme.dart';
@@ -27,7 +27,8 @@ void main() async {
       FirebaseFirestore.instance.useFirestoreEmulator(host, 8080);
       FirebaseAuth.instance.useAuthEmulator(host, 9099);
       FirebaseFunctions.instance.useFunctionsEmulator(host, 5001);
-      debugPrint('Firebase Emulators configured (Firestore:8080, Auth:9099, Functions:5001)');
+      await FirebaseStorage.instance.useStorageEmulator(host, 9199);
+      debugPrint('Firebase Emulators configured (Firestore:8080, Auth:9099, Functions:5001, Storage:9199)');
     } catch (e) {
       debugPrint('Failed to configure Emulators: $e');
     }
