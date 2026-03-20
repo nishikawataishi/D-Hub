@@ -522,7 +522,7 @@ class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              isPending ? '審査中：承認されるまで機能が制限されます。' : '申請却下：内容を確認し、再申請してください。',
+              isPending ? '審査中：承認されるまで機能が制限されます。審査が終わり次第（24H以内）自動で承認され、フルサービスがご利用頂けます。' : '申請却下：内容を確認し、再申請してください。',
               style: TextStyle(
                 color: isPending ? Colors.amber.shade900 : Colors.red.shade900,
                 fontSize: 13,
