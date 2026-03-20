@@ -8,6 +8,7 @@ import '../models/user_profile.dart';
 import '../models/tag.dart';
 import '../theme/app_theme.dart';
 import 'profile_edit_screen.dart';
+import 'password_change_screen.dart';
 import 'components/photo_gallery.dart';
 
 /// マイページ画面
@@ -378,6 +379,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 context,
                 MaterialPageRoute(
                   builder: (context) => ProfileEditScreen(profile: profile),
+                ),
+              );
+            },
+          ),
+          const Divider(height: 1, indent: 56),
+          _SettingsTile(
+            icon: Icons.lock_outline,
+            title: 'パスワード変更',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const PasswordChangeScreen(),
                 ),
               );
             },
