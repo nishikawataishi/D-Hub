@@ -201,6 +201,34 @@ class AuthNotifier extends ChangeNotifier {
     // _onAuthStateChanged が自動的に unauthenticated を設定
   }
 
+  /// ログイン中のユーザーのパスワードを変更
+  Future<AuthResult> changePassword(
+    String currentPassword,
+    String newPassword,
+  ) async {
+    final user = _auth.currentUser;
+    if (user == null || user.email == null) {
+      return AuthResult.failure('ログインが必要です');
+    }
+
+    try {
+      // 現在のパスワードで再認証
+      final credential = EmailAuthProvider.credential(
+        email: user.email!,
+        password: currentPassword,
+      );
+      await user.reauthenticateWithCredential(credential);
+
+      // パスワード更新
+      await user.updatePassword(newPassword);
+      return AuthResult.success('パスワードを変更しました');
+    } on FirebaseAuthException catch (e) {
+      return AuthResult.failure(_mapFirebaseError(e.code));
+    } catch (e) {
+      return AuthResult.failure('パスワードの変更に失敗しました');
+    }
+  }
+
   /// パスワードリセットメールを送信
   Future<AuthResult> sendPasswordReset(String email) async {
     try {

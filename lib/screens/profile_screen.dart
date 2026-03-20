@@ -8,6 +8,9 @@ import '../models/user_profile.dart';
 import '../models/tag.dart';
 import '../theme/app_theme.dart';
 import 'profile_edit_screen.dart';
+import 'password_change_screen.dart';
+import 'terms_screen.dart';
+import 'privacy_policy_screen.dart';
 import 'components/photo_gallery.dart';
 
 /// マイページ画面
@@ -384,6 +387,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const Divider(height: 1, indent: 56),
           _SettingsTile(
+            icon: Icons.lock_outline,
+            title: 'パスワード変更',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const PasswordChangeScreen(),
+                ),
+              );
+            },
+          ),
+          const Divider(height: 1, indent: 56),
+          _SettingsTile(
             icon: Icons.notifications_none_outlined,
             title: '通知設定',
             onTap: () {},
@@ -393,6 +409,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
             icon: Icons.help_outline,
             title: 'ヘルプ・お問い合わせ',
             onTap: () {},
+          ),
+          const Divider(height: 1, indent: 56),
+          _SettingsTile(
+            icon: Icons.description_outlined,
+            title: '利用規約',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const TermsScreen(),
+                ),
+              );
+            },
+          ),
+          const Divider(height: 1, indent: 56),
+          _SettingsTile(
+            icon: Icons.privacy_tip_outlined,
+            title: 'プライバシーポリシー',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const PrivacyPolicyScreen(),
+                ),
+              );
+            },
           ),
           const Divider(height: 1, indent: 56),
           _SettingsTile(
