@@ -22,13 +22,20 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isSignUpMode = false;
   bool _isOrganizationMode = false; // 団体アカウント登録フラグ
 
-  /// メールアドレスのバリデーション（一般メール対応）
+  /// メールアドレスのバリデーション
+  /// 学生モード新規登録時は同志社大学ドメインを必須にする
   String? _validateEmail(String? value) {
     if (value == null || value.isEmpty) {
       return 'メールアドレスを入力してください';
     }
     if (!value.contains('@') || !value.contains('.')) {
       return '正しいメールアドレスの形式で入力してください';
+    }
+    // 新規登録かつ学生モード（団体でない）場合、大学メール必須
+    if (_isSignUpMode && !_isOrganizationMode) {
+      if (!AuthService.isDoshishaEmail(value)) {
+        return '学生登録には同志社大学・同志社女子大学の\nメールアドレスが必要です';
+      }
     }
     return null;
   }
@@ -177,10 +184,12 @@ class _LoginScreenState extends State<LoginScreen> {
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
                     validator: _validateEmail,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'メールアドレス',
-                      hintText: 'example@gmail.com',
-                      prefixIcon: Icon(Icons.email_outlined),
+                      hintText: (_isSignUpMode && !_isOrganizationMode)
+                          ? 'xxx@mail2.doshisha.ac.jp'
+                          : 'example@gmail.com',
+                      prefixIcon: const Icon(Icons.email_outlined),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -301,34 +310,35 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   const SizedBox(height: 16),
 
-                  // 注意書き
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primary.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(
-                          Icons.info_outline,
-                          size: 16,
-                          color: AppTheme.primary,
-                        ),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'ログイン後、大学メールアドレスで\n学生認証を行います（初回のみ）',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.primary,
-                              height: 1.4,
+                  // 注意書き（学生新規登録モード時のみ表示）
+                  if (_isSignUpMode && !_isOrganizationMode)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(
+                            Icons.info_outline,
+                            size: 16,
+                            color: AppTheme.primary,
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '学生登録には大学メールアドレスが必要です\n登録後に確認コードで在籍を認証します',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.primary,
+                                height: 1.4,
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
