@@ -266,6 +266,41 @@ class _ScoutDetailScreenState extends State<ScoutDetailScreen> {
                 ),
               ),
             ),
+            // グループLINEボタン（URLが設定されている場合のみ表示）
+            if ((widget.scout.organizationGroupLineUrl ?? '').trim().isNotEmpty) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 56,
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    final uri = Uri.parse(
+                      widget.scout.organizationGroupLineUrl!.trim(),
+                    );
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    } else {
+                      messenger.showSnackBar(
+                        const SnackBar(content: Text('LINEを開けませんでした')),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.chat_bubble_outline, size: 20),
+                  label: const Text(
+                    'グループLINEに参加する',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF06C755),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
