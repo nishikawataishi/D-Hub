@@ -317,6 +317,19 @@ class FirestoreService {
         .set(data, SetOptions(merge: true));
   }
 
+  /// 全ユーザーを取得（管理画面用）
+  Stream<List<UserProfile>> getAllUsersForAdmin() {
+    return _db
+        .collection('users')
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .where((doc) => doc.data()['name'] != null)
+              .map((doc) => UserProfile.fromFirestore(doc.data(), doc.id))
+              .toList(),
+        );
+  }
+
   // ─── 初期データ投入（開発用） ───
 
   /// モックデータをFirestoreに投入する（1回だけ実行する開発用関数）
