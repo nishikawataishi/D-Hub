@@ -158,7 +158,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     crossAxisCount: 2,
                     mainAxisSpacing: 12,
                     crossAxisSpacing: 12,
-                    childAspectRatio: 0.75,
+                    childAspectRatio: 0.62,
                   ),
                   itemCount: filtered.length,
                   itemBuilder: (context, index) {
@@ -212,7 +212,7 @@ class _OrganizationCard extends StatelessWidget {
             Stack(
               children: [
                 Container(
-                  height: 90,
+                  height: 130,
                   width: double.infinity,
                   decoration: BoxDecoration(
                     color: AppTheme.surface,
