@@ -99,5 +99,19 @@ service cloud.firestore {
                     && request.resource.data.message.size() > 0
                     && request.resource.data.message.size() <= 500;
     }
+
+    // ==========================================================
+    // tags コレクション（タグマスタ）
+    // ==========================================================
+    match /tags/{docId} {
+      // 認証済みユーザーなら誰でも読み取り可能
+      allow read: if isAuthenticated();
+      // 認証済みユーザーなら誰でもタグを追加可能
+      allow create: if isAuthenticated();
+      // 削除は管理者のみ
+      allow delete: if isAdmin();
+      // 更新は管理者のみ
+      allow update: if isAdmin();
+    }
   }
 }

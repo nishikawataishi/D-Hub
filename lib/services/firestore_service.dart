@@ -228,6 +228,47 @@ class FirestoreService {
     await _db.collection('events').doc(eventId).delete();
   }
 
+  // ─── タグマスタ（Tags） ───
+
+  /// 全タグをストリームで取得（名前順）
+  Stream<List<Tag>> getTags() {
+    return _db
+        .collection('tags')
+        .orderBy('name')
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => Tag.fromFirestore(doc.data(), doc.id))
+              .toList(),
+        );
+  }
+
+  /// タグをマスタに追加（同名が存在しない場合のみ）
+  /// 既に存在する場合は何もせず既存のタグ名を返す
+  Future<void> addTag(String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+
+    // 同名タグが既に存在するかチェック
+    final existing = await _db
+        .collection('tags')
+        .where('name', isEqualTo: trimmed)
+        .limit(1)
+        .get();
+
+    if (existing.docs.isNotEmpty) return; // 既に存在する場合はスキップ
+
+    await _db.collection('tags').add({
+      'name': trimmed,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// タグをマスタから削除（管理者用）
+  Future<void> deleteTag(String tagId) async {
+    await _db.collection('tags').doc(tagId).delete();
+  }
+
   // ─── ユーザープロフィール ───
 
   /// ユーザープロフィールを取得
@@ -312,6 +353,15 @@ class FirestoreService {
         'description': event.description,
         'startAt': Timestamp.fromDate(event.startAt),
         'campus': event.campus.name,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    }
+
+    // タグマスタデータを投入
+    for (final tag in mockTags) {
+      final docRef = _db.collection('tags').doc(tag.id);
+      batch.set(docRef, {
+        'name': tag.name,
         'createdAt': FieldValue.serverTimestamp(),
       });
     }
