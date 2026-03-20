@@ -11,6 +11,10 @@ class Event {
   final DateTime startAt;
   final Campus campus;
   final String? organizationLogoUrl;
+  final String? fee;           // 参加費
+  final String? capacity;      // 人数
+  final String? location;      // 場所
+  final String? groupLineUrl;  // グループLINE URL
 
   const Event({
     required this.id,
@@ -20,6 +24,10 @@ class Event {
     required this.startAt,
     required this.campus,
     this.organizationLogoUrl,
+    this.fee,
+    this.capacity,
+    this.location,
+    this.groupLineUrl,
   });
 
   Event copyWith({
@@ -30,6 +38,10 @@ class Event {
     DateTime? startAt,
     Campus? campus,
     String? organizationLogoUrl,
+    String? fee,
+    String? capacity,
+    String? location,
+    String? groupLineUrl,
   }) {
     return Event(
       id: id ?? this.id,
@@ -39,6 +51,10 @@ class Event {
       startAt: startAt ?? this.startAt,
       campus: campus ?? this.campus,
       organizationLogoUrl: organizationLogoUrl ?? this.organizationLogoUrl,
+      fee: fee ?? this.fee,
+      capacity: capacity ?? this.capacity,
+      location: location ?? this.location,
+      groupLineUrl: groupLineUrl ?? this.groupLineUrl,
     );
   }
 
@@ -72,6 +88,10 @@ class Event {
       startAt: startAtTimestamp?.toDate() ?? DateTime.now(),
       campus: Campus.fromString(data['campus'] as String? ?? ''),
       organizationLogoUrl: data['organizationLogoUrl'] as String?,
+      fee: data['fee'] as String?,
+      capacity: data['capacity'] as String?,
+      location: data['location'] as String?,
+      groupLineUrl: data['groupLineUrl'] as String?,
     );
   }
 
@@ -89,6 +109,11 @@ class Event {
       'campus': campus.name,
       if (organizationLogoUrl != null)
         'organizationLogoUrl': organizationLogoUrl,
+      'fee': fee,
+      'capacity': capacity,
+      'location': location,
+      if (groupLineUrl != null && groupLineUrl!.isNotEmpty)
+        'groupLineUrl': groupLineUrl,
       'updatedAt': FieldValue.serverTimestamp(),
     };
   }

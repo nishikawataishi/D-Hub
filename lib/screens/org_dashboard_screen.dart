@@ -6,14 +6,15 @@ import '../services/auth_notifier.dart';
 import '../services/firestore_service.dart';
 import '../models/user_profile.dart';
 import '../models/event.dart';
+import '../models/event_application.dart';
 import '../models/organization.dart';
 import 'components/student_card.dart';
 import 'components/org_profile_edit_tab.dart';
-import 'org_create_screen.dart'; // 新規追加
+import 'org_create_screen.dart';
 import 'student_detail_screen.dart';
 import 'event_edit_screen.dart';
-// Added this import as it seems to be intended for event details
-import 'components/verified_badge.dart'; // Added this import as it seems to be intended for verified badge
+import 'event_applications_screen.dart';
+import 'components/verified_badge.dart';
 
 /// 団体用ダッシュボード画面
 /// 学生検索・スカウト、団体プロフィール編集、イベント管理などを行う
@@ -36,18 +37,22 @@ class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
   }
 
   Future<void> _loadOrgStatus() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      final org = await FirestoreService().getOrganization(user.uid);
-      if (mounted) {
-        setState(() {
-          _currentOrg = org;
-          _isOrgLoading = false;
-        });
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final org = await FirestoreService().getOrganization(user.uid);
+        if (mounted) {
+          setState(() {
+            _currentOrg = org;
+            _isOrgLoading = false;
+          });
+        }
+        return;
       }
-    } else {
-      if (mounted) setState(() => _isOrgLoading = false);
+    } catch (e) {
+      debugPrint('OrgDashboardScreen._loadOrgStatus error: $e');
     }
+    if (mounted) setState(() => _isOrgLoading = false);
   }
 
   @override
@@ -283,20 +288,57 @@ class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
                 borderRadius: BorderRadius.circular(12),
                 side: const BorderSide(color: AppTheme.border),
               ),
-              child: ListTile(
-                contentPadding: const EdgeInsets.all(16),
-                title: Text(
-                  event.title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-                subtitle: Padding(
-                  padding: const EdgeInsets.only(top: 8),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) =>
+                          EventApplicationsScreen(event: event),
+                    ),
+                  );
+                },
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              event.title,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                          ),
+                          // 編集ボタン
+                          IconButton(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      EventEditScreen(event: event),
+                                ),
+                              );
+                            },
+                            icon: const Icon(
+                              Icons.edit_outlined,
+                              color: AppTheme.primary,
+                              size: 20,
+                            ),
+                            tooltip: 'イベントを編集',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
                       Row(
                         children: [
                           const Icon(
@@ -312,11 +354,7 @@ class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
                               fontSize: 13,
                             ),
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
+                          const SizedBox(width: 16),
                           const Icon(
                             Icons.location_on_outlined,
                             size: 14,
@@ -332,21 +370,56 @@ class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
                           ),
                         ],
                       ),
+                      const SizedBox(height: 10),
+                      // 申し込み件数バッジ
+                      StreamBuilder<List<EventApplication>>(
+                        stream: FirestoreService()
+                            .getApplicationsForEvent(event.id),
+                        builder: (context, appSnapshot) {
+                          final apps = appSnapshot.data ?? [];
+                          final total = apps.length;
+                          final accepted = apps
+                              .where(
+                                (a) =>
+                                    a.status == ApplicationStatus.accepted,
+                              )
+                              .length;
+                          final pending = apps
+                              .where(
+                                (a) => a.status == ApplicationStatus.applied,
+                              )
+                              .length;
+
+                          return Row(
+                            children: [
+                              _AppCountChip(
+                                icon: Icons.people_outline,
+                                label: '申し込み $total 件',
+                                color: AppTheme.primary,
+                              ),
+                              if (pending > 0) ...[
+                                const SizedBox(width: 8),
+                                _AppCountChip(
+                                  icon: Icons.hourglass_empty,
+                                  label: '審査中 $pending',
+                                  color: Colors.orange,
+                                ),
+                              ],
+                              if (accepted > 0) ...[
+                                const SizedBox(width: 8),
+                                _AppCountChip(
+                                  icon: Icons.check_circle_outline,
+                                  label: '承認 $accepted',
+                                  color: Colors.green,
+                                ),
+                              ],
+                            ],
+                          );
+                        },
+                      ),
                     ],
                   ),
                 ),
-                trailing: const Icon(
-                  Icons.edit_outlined,
-                  color: AppTheme.primary,
-                ),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => EventEditScreen(event: event),
-                    ),
-                  );
-                },
               ),
             );
           },
@@ -455,6 +528,46 @@ class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 申し込み件数表示チップ
+class _AppCountChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  const _AppCountChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: color,
             ),
           ),
         ],

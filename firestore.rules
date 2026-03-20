@@ -66,7 +66,7 @@ service cloud.firestore {
     // ==========================================================
     // events コレクション
     // ==========================================================
-    match /events/{docId} {
+    match /events/{eventId} {
       allow read: if isAuthenticated();
       // 団体UID制限: 審査承認済みの団体のみ作成・更新・削除可能
       allow create: if isVerifiedOrg() && request.resource.data.organizationId == request.auth.uid;
@@ -74,6 +74,32 @@ service cloud.firestore {
                     && resource.data.organizationId == request.auth.uid
                     && request.resource.data.organizationId == request.auth.uid;
       allow delete: if isVerifiedOrg() && resource.data.organizationId == request.auth.uid;
+
+      // ── イベント申し込み（applications サブコレクション） ──
+      match /applications/{applicationId} {
+        // 読み取り: 申し込んだ学生本人 または イベント主催団体
+        allow get: if isAuthenticated() && (
+          request.auth.uid == applicationId ||
+          get(/databases/$(database)/documents/events/$(eventId)).data.organizationId == request.auth.uid
+        );
+        // 一覧取得: イベント主催団体のみ（学生は自分の申し込みは get で取得）
+        allow list: if isAuthenticated() &&
+          get(/databases/$(database)/documents/events/$(eventId)).data.organizationId == request.auth.uid;
+
+        // 作成: 認証済み学生のみ。docIDは自分のUID固定で1人1申し込みを保証。初期ステータスは applied 固定
+        allow create: if isAuthenticated()
+                      && applicationId == request.auth.uid
+                      && request.resource.data.studentId == request.auth.uid
+                      && request.resource.data.status == 'applied';
+
+        // 更新: 主催団体がステータスと respondedAt のみ変更可能
+        allow update: if isAuthenticated()
+                      && get(/databases/$(database)/documents/events/$(eventId)).data.organizationId == request.auth.uid
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt']);
+
+        // 削除（キャンセル）: 申し込んだ学生本人のみ
+        allow delete: if isAuthenticated() && request.auth.uid == applicationId;
+      }
     }
 
     // ==========================================================

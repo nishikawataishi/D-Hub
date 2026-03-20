@@ -21,6 +21,7 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
   late TextEditingController _nameController;
   late TextEditingController _descController;
   late TextEditingController _instaController;
+  late TextEditingController _lineController;
 
   Organization? _org;
   bool _isLoading = true;
@@ -36,29 +37,36 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
     _nameController = TextEditingController();
     _descController = TextEditingController();
     _instaController = TextEditingController();
+    _lineController = TextEditingController();
     _loadProfile();
   }
 
   Future<void> _loadProfile() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      final org = await FirestoreService().getOrganization(user.uid);
-      if (org != null) {
-        setState(() {
-          _org = org;
-          _nameController.text = org.name;
-          _descController.text = org.description;
-          _instaController.text = org.instagramUrl;
-          _selectedCategories = List.from(org.categories);
-          _selectedCampus = org.campus;
-          _photoUrls = List<String>.from(org.photoUrls);
-          _isLoading = false;
-        });
-        return;
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final org = await FirestoreService().getOrganization(user.uid);
+        if (org != null) {
+          if (mounted) {
+            setState(() {
+              _org = org;
+              _nameController.text = org.name;
+              _descController.text = org.description;
+              _instaController.text = org.instagramUrl;
+              _lineController.text = org.groupLineUrl;
+              _selectedCategories = List.from(org.categories);
+              _selectedCampus = org.campus;
+              _photoUrls = List<String>.from(org.photoUrls);
+              _isLoading = false;
+            });
+          }
+          return;
+        }
       }
+    } catch (e) {
+      debugPrint('OrgProfileEditTab._loadProfile error: $e');
     }
-    // 空あるいはエラーの場合はローディング終了
-    setState(() => _isLoading = false);
+    if (mounted) setState(() => _isLoading = false);
   }
 
   @override
@@ -66,6 +74,7 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
     _nameController.dispose();
     _descController.dispose();
     _instaController.dispose();
+    _lineController.dispose();
     super.dispose();
   }
 
@@ -150,6 +159,12 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
               controller: _instaController,
               label: 'Instagramリンク',
               icon: Icons.link,
+            ),
+            const SizedBox(height: 16),
+            _buildTextField(
+              controller: _lineController,
+              label: 'グループLINE URL',
+              icon: Icons.chat_bubble_outline,
             ),
             const SizedBox(height: 24),
             _buildSectionTitle('カテゴリー（複数選択可）'),
@@ -360,10 +375,16 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
             campus: _selectedCampus,
             logoEmoji: _org!.logoEmoji,
             instagramUrl: _org!.instagramUrl,
+            groupLineUrl: _org!.groupLineUrl,
             logoUrl: url,
             photoUrls: _photoUrls,
+            status: _org!.status,
+            representativeId: _org!.representativeId,
+            proofImageUrl: _org!.proofImageUrl,
+            verifiedAt: _org!.verifiedAt,
+            isOfficial: _org!.isOfficial,
           );
-          await FirestoreService().saveOrganization(updatedOrg);
+          await FirestoreService().updateOrgProfile(updatedOrg);
           if (mounted) {
             setState(() {
               _org = updatedOrg;
@@ -408,12 +429,18 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
         campus: _selectedCampus,
         logoEmoji: _org!.logoEmoji,
         instagramUrl: _instaController.text.trim(),
+        groupLineUrl: _lineController.text.trim(),
         logoUrl: _org!.logoUrl,
         photoUrls: _photoUrls,
+        status: _org!.status,
+        representativeId: _org!.representativeId,
+        proofImageUrl: _org!.proofImageUrl,
+        verifiedAt: _org!.verifiedAt,
+        isOfficial: _org!.isOfficial,
       );
 
       try {
-        await FirestoreService().saveOrganization(updatedOrg);
+        await FirestoreService().updateOrgProfile(updatedOrg);
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

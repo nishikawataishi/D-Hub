@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/organization.dart';
 import '../models/event.dart';
@@ -9,18 +10,41 @@ import 'components/photo_gallery.dart';
 import '../services/firestore_service.dart';
 import 'event_detail_screen.dart';
 
-class GroupDetailScreen extends StatelessWidget {
+class GroupDetailScreen extends StatefulWidget {
   final Organization organization;
-  final _firestoreService = FirestoreService();
 
-  GroupDetailScreen({super.key, required this.organization});
+  const GroupDetailScreen({super.key, required this.organization});
+
+  @override
+  State<GroupDetailScreen> createState() => _GroupDetailScreenState();
+}
+
+class _GroupDetailScreenState extends State<GroupDetailScreen> {
+  final _firestoreService = FirestoreService();
+  bool _isScouted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkScoutStatus();
+  }
+
+  Future<void> _checkScoutStatus() async {
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null) return;
+    final result = await _firestoreService.hasScouted(
+      orgId: widget.organization.id,
+      userId: userId,
+    );
+    if (mounted) setState(() => _isScouted = result);
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: Text(organization.name),
+        title: Text(widget.organization.name),
         actions: [
           IconButton(
             icon: const Icon(Icons.share),
@@ -45,19 +69,19 @@ class GroupDetailScreen extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: AppTheme.primary.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
-                  image: organization.logoUrl != null
+                  image: widget.organization.logoUrl != null
                       ? DecorationImage(
                           image: CachedNetworkImageProvider(
-                            organization.logoUrl!,
+                            widget.organization.logoUrl!,
                           ),
                           fit: BoxFit.cover,
                         )
                       : null,
                 ),
-                child: organization.logoUrl == null
+                child: widget.organization.logoUrl == null
                     ? Center(
                         child: Text(
-                          organization.logoEmoji,
+                          widget.organization.logoEmoji,
                           style: const TextStyle(fontSize: 50),
                         ),
                       )
@@ -65,9 +89,9 @@ class GroupDetailScreen extends StatelessWidget {
               ),
             ),
             // 写真ギャラリー
-            if (organization.photoUrls.isNotEmpty) ...[
+            if (widget.organization.photoUrls.isNotEmpty) ...[
               const SizedBox(height: 16),
-              PhotoGallery(photoUrls: organization.photoUrls),
+              PhotoGallery(photoUrls: widget.organization.photoUrls),
             ],
             const SizedBox(height: 16),
             Center(
@@ -75,13 +99,13 @@ class GroupDetailScreen extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
-                    organization.name,
+                    widget.organization.name,
                     style: const TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  if (organization.status == 'verified') ...[
+                  if (widget.organization.status == 'verified') ...[
                     const SizedBox(width: 8),
                     const VerifiedBadge(size: 24),
                   ],
@@ -90,8 +114,8 @@ class GroupDetailScreen extends StatelessWidget {
             ),
             Center(
               child: Text(
-                organization.categories.isNotEmpty
-                    ? organization.categories.first.label
+                widget.organization.categories.isNotEmpty
+                    ? widget.organization.categories.first.label
                     : '',
                 style: const TextStyle(
                   color: AppTheme.primary,
@@ -103,9 +127,9 @@ class GroupDetailScreen extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _buildChip(organization.categories.first.label, Icons.category),
+                _buildChip(widget.organization.categories.first.label, Icons.category),
                 const SizedBox(width: 8),
-                _buildChip(organization.campus.label, Icons.location_on),
+                _buildChip(widget.organization.campus.label, Icons.location_on),
               ],
             ),
             const SizedBox(height: 32),
@@ -129,7 +153,7 @@ class GroupDetailScreen extends StatelessWidget {
                 border: Border.all(color: AppTheme.border),
               ),
               child: Text(
-                organization.description,
+                widget.organization.description,
                 style: const TextStyle(
                   fontSize: 15,
                   color: AppTheme.textSecondary,
@@ -139,14 +163,14 @@ class GroupDetailScreen extends StatelessWidget {
             ),
 
             // Instagram リンク
-            if (organization.instagramUrl.trim().isNotEmpty) ...[
+            if (widget.organization.instagramUrl.trim().isNotEmpty) ...[
               const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
                   onPressed: () async {
                     final url = _buildInstagramUrl(
-                      organization.instagramUrl.trim(),
+                      widget.organization.instagramUrl.trim(),
                     );
                     final uri = Uri.parse(url);
                     if (await canLaunchUrl(uri)) {
@@ -169,6 +193,47 @@ class GroupDetailScreen extends StatelessWidget {
                 ),
               ),
             ],
+
+            // グループLINE（スカウト済みの場合のみ表示）
+            if (_isScouted &&
+                widget.organization.groupLineUrl.trim().isNotEmpty) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    final uri = Uri.parse(
+                      widget.organization.groupLineUrl.trim(),
+                    );
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(
+                        uri,
+                        mode: LaunchMode.externalApplication,
+                      );
+                    } else {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('LINEを開けませんでした')),
+                        );
+                      }
+                    }
+                  },
+                  icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                  label: const Text(
+                    'グループLINEに参加する',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF06C755),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 32),
 
             // イベント一覧
@@ -183,7 +248,7 @@ class GroupDetailScreen extends StatelessWidget {
             const SizedBox(height: 8),
             StreamBuilder<List<Event>>(
               stream: _firestoreService.getEventsByOrganization(
-                organization.id,
+                widget.organization.id,
               ),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
