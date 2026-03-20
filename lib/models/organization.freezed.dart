@@ -15,7 +15,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$Organization {
 
- String get id; String get name; String get description; List<OrgCategory> get categories; Campus get campus; String get logoEmoji; String get instagramUrl; String? get logoUrl;// 追加フィールド
+ String get id; String get name; String get description; List<OrgCategory> get categories; Campus get campus; String get logoEmoji; String get instagramUrl; String get groupLineUrl; String? get logoUrl;// 追加フィールド
  String? get representativeId; String get status;// 'pending', 'verified', 'rejected'
  String? get proofImageUrl; DateTime? get verifiedAt; bool get isOfficial; DateTime? get createdAt; List<String> get photoUrls;
 /// Create a copy of Organization
@@ -30,16 +30,16 @@ $OrganizationCopyWith<Organization> get copyWith => _$OrganizationCopyWithImpl<O
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is Organization&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.description, description) || other.description == description)&&const DeepCollectionEquality().equals(other.categories, categories)&&(identical(other.campus, campus) || other.campus == campus)&&(identical(other.logoEmoji, logoEmoji) || other.logoEmoji == logoEmoji)&&(identical(other.instagramUrl, instagramUrl) || other.instagramUrl == instagramUrl)&&(identical(other.logoUrl, logoUrl) || other.logoUrl == logoUrl)&&(identical(other.representativeId, representativeId) || other.representativeId == representativeId)&&(identical(other.status, status) || other.status == status)&&(identical(other.proofImageUrl, proofImageUrl) || other.proofImageUrl == proofImageUrl)&&(identical(other.verifiedAt, verifiedAt) || other.verifiedAt == verifiedAt)&&(identical(other.isOfficial, isOfficial) || other.isOfficial == isOfficial)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&const DeepCollectionEquality().equals(other.photoUrls, photoUrls));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is Organization&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.description, description) || other.description == description)&&const DeepCollectionEquality().equals(other.categories, categories)&&(identical(other.campus, campus) || other.campus == campus)&&(identical(other.logoEmoji, logoEmoji) || other.logoEmoji == logoEmoji)&&(identical(other.instagramUrl, instagramUrl) || other.instagramUrl == instagramUrl)&&(identical(other.groupLineUrl, groupLineUrl) || other.groupLineUrl == groupLineUrl)&&(identical(other.logoUrl, logoUrl) || other.logoUrl == logoUrl)&&(identical(other.representativeId, representativeId) || other.representativeId == representativeId)&&(identical(other.status, status) || other.status == status)&&(identical(other.proofImageUrl, proofImageUrl) || other.proofImageUrl == proofImageUrl)&&(identical(other.verifiedAt, verifiedAt) || other.verifiedAt == verifiedAt)&&(identical(other.isOfficial, isOfficial) || other.isOfficial == isOfficial)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&const DeepCollectionEquality().equals(other.photoUrls, photoUrls));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,name,description,const DeepCollectionEquality().hash(categories),campus,logoEmoji,instagramUrl,logoUrl,representativeId,status,proofImageUrl,verifiedAt,isOfficial,createdAt,const DeepCollectionEquality().hash(photoUrls));
+int get hashCode => Object.hash(runtimeType,id,name,description,const DeepCollectionEquality().hash(categories),campus,logoEmoji,instagramUrl,groupLineUrl,logoUrl,representativeId,status,proofImageUrl,verifiedAt,isOfficial,createdAt,const DeepCollectionEquality().hash(photoUrls));
 
 @override
 String toString() {
-  return 'Organization(id: $id, name: $name, description: $description, categories: $categories, campus: $campus, logoEmoji: $logoEmoji, instagramUrl: $instagramUrl, logoUrl: $logoUrl, representativeId: $representativeId, status: $status, proofImageUrl: $proofImageUrl, verifiedAt: $verifiedAt, isOfficial: $isOfficial, createdAt: $createdAt, photoUrls: $photoUrls)';
+  return 'Organization(id: $id, name: $name, description: $description, categories: $categories, campus: $campus, logoEmoji: $logoEmoji, instagramUrl: $instagramUrl, groupLineUrl: $groupLineUrl, logoUrl: $logoUrl, representativeId: $representativeId, status: $status, proofImageUrl: $proofImageUrl, verifiedAt: $verifiedAt, isOfficial: $isOfficial, createdAt: $createdAt, photoUrls: $photoUrls)';
 }
 
 
@@ -50,7 +50,7 @@ abstract mixin class $OrganizationCopyWith<$Res>  {
   factory $OrganizationCopyWith(Organization value, $Res Function(Organization) _then) = _$OrganizationCopyWithImpl;
 @useResult
 $Res call({
- String id, String name, String description, List<OrgCategory> categories, Campus campus, String logoEmoji, String instagramUrl, String? logoUrl, String? representativeId, String status, String? proofImageUrl, DateTime? verifiedAt, bool isOfficial, DateTime? createdAt, List<String> photoUrls
+ String id, String name, String description, List<OrgCategory> categories, Campus campus, String logoEmoji, String instagramUrl, String groupLineUrl, String? logoUrl, String? representativeId, String status, String? proofImageUrl, DateTime? verifiedAt, bool isOfficial, DateTime? createdAt, List<String> photoUrls
 });
 
 
@@ -67,7 +67,7 @@ class _$OrganizationCopyWithImpl<$Res>
 
 /// Create a copy of Organization
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? name = null,Object? description = null,Object? categories = null,Object? campus = null,Object? logoEmoji = null,Object? instagramUrl = null,Object? logoUrl = freezed,Object? representativeId = freezed,Object? status = null,Object? proofImageUrl = freezed,Object? verifiedAt = freezed,Object? isOfficial = null,Object? createdAt = freezed,Object? photoUrls = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? name = null,Object? description = null,Object? categories = null,Object? campus = null,Object? logoEmoji = null,Object? instagramUrl = null,Object? groupLineUrl = null,Object? logoUrl = freezed,Object? representativeId = freezed,Object? status = null,Object? proofImageUrl = freezed,Object? verifiedAt = freezed,Object? isOfficial = null,Object? createdAt = freezed,Object? photoUrls = null,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
@@ -76,6 +76,7 @@ as String,categories: null == categories ? _self.categories : categories // igno
 as List<OrgCategory>,campus: null == campus ? _self.campus : campus // ignore: cast_nullable_to_non_nullable
 as Campus,logoEmoji: null == logoEmoji ? _self.logoEmoji : logoEmoji // ignore: cast_nullable_to_non_nullable
 as String,instagramUrl: null == instagramUrl ? _self.instagramUrl : instagramUrl // ignore: cast_nullable_to_non_nullable
+as String,groupLineUrl: null == groupLineUrl ? _self.groupLineUrl : groupLineUrl // ignore: cast_nullable_to_non_nullable
 as String,logoUrl: freezed == logoUrl ? _self.logoUrl : logoUrl // ignore: cast_nullable_to_non_nullable
 as String?,representativeId: freezed == representativeId ? _self.representativeId : representativeId // ignore: cast_nullable_to_non_nullable
 as String?,status: null == status ? _self.status : status // ignore: cast_nullable_to_non_nullable
@@ -169,10 +170,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String name,  String description,  List<OrgCategory> categories,  Campus campus,  String logoEmoji,  String instagramUrl,  String? logoUrl,  String? representativeId,  String status,  String? proofImageUrl,  DateTime? verifiedAt,  bool isOfficial,  DateTime? createdAt,  List<String> photoUrls)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String name,  String description,  List<OrgCategory> categories,  Campus campus,  String logoEmoji,  String instagramUrl,  String groupLineUrl,  String? logoUrl,  String? representativeId,  String status,  String? proofImageUrl,  DateTime? verifiedAt,  bool isOfficial,  DateTime? createdAt,  List<String> photoUrls)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _Organization() when $default != null:
-return $default(_that.id,_that.name,_that.description,_that.categories,_that.campus,_that.logoEmoji,_that.instagramUrl,_that.logoUrl,_that.representativeId,_that.status,_that.proofImageUrl,_that.verifiedAt,_that.isOfficial,_that.createdAt,_that.photoUrls);case _:
+return $default(_that.id,_that.name,_that.description,_that.categories,_that.campus,_that.logoEmoji,_that.instagramUrl,_that.groupLineUrl,_that.logoUrl,_that.representativeId,_that.status,_that.proofImageUrl,_that.verifiedAt,_that.isOfficial,_that.createdAt,_that.photoUrls);case _:
   return orElse();
 
 }
@@ -190,10 +191,10 @@ return $default(_that.id,_that.name,_that.description,_that.categories,_that.cam
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String name,  String description,  List<OrgCategory> categories,  Campus campus,  String logoEmoji,  String instagramUrl,  String? logoUrl,  String? representativeId,  String status,  String? proofImageUrl,  DateTime? verifiedAt,  bool isOfficial,  DateTime? createdAt,  List<String> photoUrls)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String name,  String description,  List<OrgCategory> categories,  Campus campus,  String logoEmoji,  String instagramUrl,  String groupLineUrl,  String? logoUrl,  String? representativeId,  String status,  String? proofImageUrl,  DateTime? verifiedAt,  bool isOfficial,  DateTime? createdAt,  List<String> photoUrls)  $default,) {final _that = this;
 switch (_that) {
 case _Organization():
-return $default(_that.id,_that.name,_that.description,_that.categories,_that.campus,_that.logoEmoji,_that.instagramUrl,_that.logoUrl,_that.representativeId,_that.status,_that.proofImageUrl,_that.verifiedAt,_that.isOfficial,_that.createdAt,_that.photoUrls);case _:
+return $default(_that.id,_that.name,_that.description,_that.categories,_that.campus,_that.logoEmoji,_that.instagramUrl,_that.groupLineUrl,_that.logoUrl,_that.representativeId,_that.status,_that.proofImageUrl,_that.verifiedAt,_that.isOfficial,_that.createdAt,_that.photoUrls);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -210,10 +211,10 @@ return $default(_that.id,_that.name,_that.description,_that.categories,_that.cam
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String name,  String description,  List<OrgCategory> categories,  Campus campus,  String logoEmoji,  String instagramUrl,  String? logoUrl,  String? representativeId,  String status,  String? proofImageUrl,  DateTime? verifiedAt,  bool isOfficial,  DateTime? createdAt,  List<String> photoUrls)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String name,  String description,  List<OrgCategory> categories,  Campus campus,  String logoEmoji,  String instagramUrl,  String groupLineUrl,  String? logoUrl,  String? representativeId,  String status,  String? proofImageUrl,  DateTime? verifiedAt,  bool isOfficial,  DateTime? createdAt,  List<String> photoUrls)?  $default,) {final _that = this;
 switch (_that) {
 case _Organization() when $default != null:
-return $default(_that.id,_that.name,_that.description,_that.categories,_that.campus,_that.logoEmoji,_that.instagramUrl,_that.logoUrl,_that.representativeId,_that.status,_that.proofImageUrl,_that.verifiedAt,_that.isOfficial,_that.createdAt,_that.photoUrls);case _:
+return $default(_that.id,_that.name,_that.description,_that.categories,_that.campus,_that.logoEmoji,_that.instagramUrl,_that.groupLineUrl,_that.logoUrl,_that.representativeId,_that.status,_that.proofImageUrl,_that.verifiedAt,_that.isOfficial,_that.createdAt,_that.photoUrls);case _:
   return null;
 
 }
@@ -225,7 +226,7 @@ return $default(_that.id,_that.name,_that.description,_that.categories,_that.cam
 @JsonSerializable()
 
 class _Organization extends Organization {
-  const _Organization({required this.id, required this.name, required this.description, required final  List<OrgCategory> categories, required this.campus, required this.logoEmoji, this.instagramUrl = '', this.logoUrl, this.representativeId, this.status = 'pending', this.proofImageUrl, this.verifiedAt, this.isOfficial = false, this.createdAt, final  List<String> photoUrls = const []}): _categories = categories,_photoUrls = photoUrls,super._();
+  const _Organization({required this.id, required this.name, required this.description, required final  List<OrgCategory> categories, required this.campus, required this.logoEmoji, this.instagramUrl = '', this.groupLineUrl = '', this.logoUrl, this.representativeId, this.status = 'pending', this.proofImageUrl, this.verifiedAt, this.isOfficial = false, this.createdAt, final  List<String> photoUrls = const []}): _categories = categories,_photoUrls = photoUrls,super._();
   factory _Organization.fromJson(Map<String, dynamic> json) => _$OrganizationFromJson(json);
 
 @override final  String id;
@@ -241,6 +242,7 @@ class _Organization extends Organization {
 @override final  Campus campus;
 @override final  String logoEmoji;
 @override@JsonKey() final  String instagramUrl;
+@override@JsonKey() final  String groupLineUrl;
 @override final  String? logoUrl;
 // 追加フィールド
 @override final  String? representativeId;
@@ -271,16 +273,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _Organization&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.description, description) || other.description == description)&&const DeepCollectionEquality().equals(other._categories, _categories)&&(identical(other.campus, campus) || other.campus == campus)&&(identical(other.logoEmoji, logoEmoji) || other.logoEmoji == logoEmoji)&&(identical(other.instagramUrl, instagramUrl) || other.instagramUrl == instagramUrl)&&(identical(other.logoUrl, logoUrl) || other.logoUrl == logoUrl)&&(identical(other.representativeId, representativeId) || other.representativeId == representativeId)&&(identical(other.status, status) || other.status == status)&&(identical(other.proofImageUrl, proofImageUrl) || other.proofImageUrl == proofImageUrl)&&(identical(other.verifiedAt, verifiedAt) || other.verifiedAt == verifiedAt)&&(identical(other.isOfficial, isOfficial) || other.isOfficial == isOfficial)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&const DeepCollectionEquality().equals(other._photoUrls, _photoUrls));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _Organization&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.description, description) || other.description == description)&&const DeepCollectionEquality().equals(other._categories, _categories)&&(identical(other.campus, campus) || other.campus == campus)&&(identical(other.logoEmoji, logoEmoji) || other.logoEmoji == logoEmoji)&&(identical(other.instagramUrl, instagramUrl) || other.instagramUrl == instagramUrl)&&(identical(other.groupLineUrl, groupLineUrl) || other.groupLineUrl == groupLineUrl)&&(identical(other.logoUrl, logoUrl) || other.logoUrl == logoUrl)&&(identical(other.representativeId, representativeId) || other.representativeId == representativeId)&&(identical(other.status, status) || other.status == status)&&(identical(other.proofImageUrl, proofImageUrl) || other.proofImageUrl == proofImageUrl)&&(identical(other.verifiedAt, verifiedAt) || other.verifiedAt == verifiedAt)&&(identical(other.isOfficial, isOfficial) || other.isOfficial == isOfficial)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&const DeepCollectionEquality().equals(other._photoUrls, _photoUrls));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,name,description,const DeepCollectionEquality().hash(_categories),campus,logoEmoji,instagramUrl,logoUrl,representativeId,status,proofImageUrl,verifiedAt,isOfficial,createdAt,const DeepCollectionEquality().hash(_photoUrls));
+int get hashCode => Object.hash(runtimeType,id,name,description,const DeepCollectionEquality().hash(_categories),campus,logoEmoji,instagramUrl,groupLineUrl,logoUrl,representativeId,status,proofImageUrl,verifiedAt,isOfficial,createdAt,const DeepCollectionEquality().hash(_photoUrls));
 
 @override
 String toString() {
-  return 'Organization(id: $id, name: $name, description: $description, categories: $categories, campus: $campus, logoEmoji: $logoEmoji, instagramUrl: $instagramUrl, logoUrl: $logoUrl, representativeId: $representativeId, status: $status, proofImageUrl: $proofImageUrl, verifiedAt: $verifiedAt, isOfficial: $isOfficial, createdAt: $createdAt, photoUrls: $photoUrls)';
+  return 'Organization(id: $id, name: $name, description: $description, categories: $categories, campus: $campus, logoEmoji: $logoEmoji, instagramUrl: $instagramUrl, groupLineUrl: $groupLineUrl, logoUrl: $logoUrl, representativeId: $representativeId, status: $status, proofImageUrl: $proofImageUrl, verifiedAt: $verifiedAt, isOfficial: $isOfficial, createdAt: $createdAt, photoUrls: $photoUrls)';
 }
 
 
@@ -291,7 +293,7 @@ abstract mixin class _$OrganizationCopyWith<$Res> implements $OrganizationCopyWi
   factory _$OrganizationCopyWith(_Organization value, $Res Function(_Organization) _then) = __$OrganizationCopyWithImpl;
 @override @useResult
 $Res call({
- String id, String name, String description, List<OrgCategory> categories, Campus campus, String logoEmoji, String instagramUrl, String? logoUrl, String? representativeId, String status, String? proofImageUrl, DateTime? verifiedAt, bool isOfficial, DateTime? createdAt, List<String> photoUrls
+ String id, String name, String description, List<OrgCategory> categories, Campus campus, String logoEmoji, String instagramUrl, String groupLineUrl, String? logoUrl, String? representativeId, String status, String? proofImageUrl, DateTime? verifiedAt, bool isOfficial, DateTime? createdAt, List<String> photoUrls
 });
 
 
@@ -308,7 +310,7 @@ class __$OrganizationCopyWithImpl<$Res>
 
 /// Create a copy of Organization
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? name = null,Object? description = null,Object? categories = null,Object? campus = null,Object? logoEmoji = null,Object? instagramUrl = null,Object? logoUrl = freezed,Object? representativeId = freezed,Object? status = null,Object? proofImageUrl = freezed,Object? verifiedAt = freezed,Object? isOfficial = null,Object? createdAt = freezed,Object? photoUrls = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? name = null,Object? description = null,Object? categories = null,Object? campus = null,Object? logoEmoji = null,Object? instagramUrl = null,Object? groupLineUrl = null,Object? logoUrl = freezed,Object? representativeId = freezed,Object? status = null,Object? proofImageUrl = freezed,Object? verifiedAt = freezed,Object? isOfficial = null,Object? createdAt = freezed,Object? photoUrls = null,}) {
   return _then(_Organization(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
@@ -317,6 +319,7 @@ as String,categories: null == categories ? _self._categories : categories // ign
 as List<OrgCategory>,campus: null == campus ? _self.campus : campus // ignore: cast_nullable_to_non_nullable
 as Campus,logoEmoji: null == logoEmoji ? _self.logoEmoji : logoEmoji // ignore: cast_nullable_to_non_nullable
 as String,instagramUrl: null == instagramUrl ? _self.instagramUrl : instagramUrl // ignore: cast_nullable_to_non_nullable
+as String,groupLineUrl: null == groupLineUrl ? _self.groupLineUrl : groupLineUrl // ignore: cast_nullable_to_non_nullable
 as String,logoUrl: freezed == logoUrl ? _self.logoUrl : logoUrl // ignore: cast_nullable_to_non_nullable
 as String?,representativeId: freezed == representativeId ? _self.representativeId : representativeId // ignore: cast_nullable_to_non_nullable
 as String?,status: null == status ? _self.status : status // ignore: cast_nullable_to_non_nullable

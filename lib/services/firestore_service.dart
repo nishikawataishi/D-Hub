@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../data/mock_data.dart';
 import '../models/scout.dart';
+import '../models/event_application.dart';
 
 /// Firestoreのデータ操作を行うサービス
 class FirestoreService {
@@ -21,12 +22,28 @@ class FirestoreService {
     );
   }
 
-  /// 団体情報を保存
+  /// 団体情報を保存（新規作成・フル上書き用）
   Future<void> saveOrganization(Organization org) async {
     await _db
         .collection('organizations')
         .doc(org.id)
         .set(org.toJson(), SetOptions(merge: true));
+  }
+
+  /// 団体プロフィールを更新（プロフィール編集用）
+  /// createdAt / verifiedAt / status などの管理フィールドは書き込まない
+  Future<void> updateOrgProfile(Organization org) async {
+    await _db.collection('organizations').doc(org.id).update({
+      'name': org.name,
+      'description': org.description,
+      'categories': org.categories.map((e) => e.name).toList(),
+      'campus': org.campus.name,
+      'logoEmoji': org.logoEmoji,
+      'instagramUrl': org.instagramUrl,
+      'groupLineUrl': org.groupLineUrl,
+      'logoUrl': org.logoUrl,
+      'photoUrls': org.photoUrls,
+    });
   }
 
   /// 全団体を取得
@@ -117,6 +134,20 @@ class FirestoreService {
               .map((doc) => Scout.fromFirestore(doc.data(), doc.id))
               .toList(),
         );
+  }
+
+  /// 特定の団体から特定ユーザーへのスカウトが存在するか確認
+  Future<bool> hasScouted({
+    required String orgId,
+    required String userId,
+  }) async {
+    final result = await _db
+        .collection('scouts')
+        .where('organizationId', isEqualTo: orgId)
+        .where('targetUserId', isEqualTo: userId)
+        .limit(1)
+        .get();
+    return result.docs.isNotEmpty;
   }
 
   /// スカウトを既読にする
@@ -226,6 +257,104 @@ class FirestoreService {
   /// イベントを削除
   Future<void> deleteEvent(String eventId) async {
     await _db.collection('events').doc(eventId).delete();
+  }
+
+  // ─── イベント申し込み（Event Applications） ───
+
+  /// イベントに申し込む（学生用）
+  /// ドキュメントIDを studentId にすることで1人1申し込みを保証
+  Future<void> applyToEvent({
+    required String eventId,
+    required UserProfile student,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) throw Exception('ログインが必要です');
+
+    final docRef = _db
+        .collection('events')
+        .doc(eventId)
+        .collection('applications')
+        .doc(user.uid);
+
+    final existing = await docRef.get();
+    if (existing.exists) {
+      throw Exception('すでにこのイベントに申し込み済みです。');
+    }
+
+    await docRef.set({
+      'studentId': user.uid,
+      'studentName': student.name,
+      'studentFaculty': student.faculty,
+      'studentGrade': student.grade,
+      if (student.iconUrl != null) 'studentIconUrl': student.iconUrl,
+      'status': 'applied',
+      'appliedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// 申し込みをキャンセル（学生用）
+  Future<void> cancelApplication(String eventId) async {
+    final user = _auth.currentUser;
+    if (user == null) throw Exception('ログインが必要です');
+
+    await _db
+        .collection('events')
+        .doc(eventId)
+        .collection('applications')
+        .doc(user.uid)
+        .delete();
+  }
+
+  /// 自分のイベント申し込み状況をリアルタイム取得（学生用）
+  Stream<EventApplication?> getMyApplication(String eventId) {
+    final user = _auth.currentUser;
+    if (user == null) return Stream.value(null);
+
+    return _db
+        .collection('events')
+        .doc(eventId)
+        .collection('applications')
+        .doc(user.uid)
+        .snapshots()
+        .map((doc) {
+      if (!doc.exists || doc.data() == null) return null;
+      return EventApplication.fromFirestore(doc.data()!, doc.id, eventId);
+    });
+  }
+
+  /// イベントの申し込み一覧をリアルタイム取得（団体用）
+  Stream<List<EventApplication>> getApplicationsForEvent(String eventId) {
+    return _db
+        .collection('events')
+        .doc(eventId)
+        .collection('applications')
+        .orderBy('appliedAt', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map(
+                (doc) =>
+                    EventApplication.fromFirestore(doc.data(), doc.id, eventId),
+              )
+              .toList(),
+        );
+  }
+
+  /// 申し込みのステータスを更新（団体用：承認・却下）
+  Future<void> updateApplicationStatus({
+    required String eventId,
+    required String applicationId,
+    required String status,
+  }) async {
+    await _db
+        .collection('events')
+        .doc(eventId)
+        .collection('applications')
+        .doc(applicationId)
+        .update({
+      'status': status,
+      'respondedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   // ─── タグマスタ（Tags） ───

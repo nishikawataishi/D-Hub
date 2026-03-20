@@ -50,6 +50,7 @@ abstract class Organization with _$Organization {
     required Campus campus,
     required String logoEmoji,
     @Default('') String instagramUrl,
+    @Default('') String groupLineUrl,
     String? logoUrl,
     // 追加フィールド
     String? representativeId,
@@ -78,14 +79,23 @@ abstract class Organization with _$Organization {
       ...json,
       'id': id,
       'categories': categoriesJson,
-      // TimestampをDateTimeに変換
+      // Timestamp または ISO文字列の両方に対応（防御的パース）
       if (json['verifiedAt'] != null)
-        'verifiedAt': (json['verifiedAt'] as dynamic)
-            .toDate()
-            .toIso8601String(),
+        'verifiedAt': _toIsoString(json['verifiedAt']),
       if (json['createdAt'] != null)
-        'createdAt': (json['createdAt'] as dynamic).toDate().toIso8601String(),
+        'createdAt': _toIsoString(json['createdAt']),
     });
+  }
+
+  /// Timestamp または ISO文字列を安全に ISO文字列へ変換
+  static String? _toIsoString(dynamic value) {
+    if (value == null) return null;
+    if (value is String) return value; // 既にISO文字列
+    try {
+      return (value as dynamic).toDate().toIso8601String(); // Timestamp
+    } catch (_) {
+      return null;
+    }
   }
 
   /// 認証時に初期化する空のプロファイル

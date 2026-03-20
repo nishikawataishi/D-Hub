@@ -22,6 +22,10 @@ class _EventEditScreenState extends State<EventEditScreen> {
 
   late TextEditingController _titleController;
   late TextEditingController _descriptionController;
+  late TextEditingController _feeController;
+  late TextEditingController _capacityController;
+  late TextEditingController _locationController;
+  late TextEditingController _groupLineUrlController;
 
   DateTime? _selectedDate;
   TimeOfDay? _selectedTime;
@@ -36,6 +40,10 @@ class _EventEditScreenState extends State<EventEditScreen> {
     _descriptionController = TextEditingController(
       text: widget.event?.description ?? '',
     );
+    _feeController = TextEditingController(text: widget.event?.fee ?? '');
+    _capacityController = TextEditingController(text: widget.event?.capacity ?? '');
+    _locationController = TextEditingController(text: widget.event?.location ?? '');
+    _groupLineUrlController = TextEditingController(text: widget.event?.groupLineUrl ?? '');
 
     if (widget.event != null) {
       _selectedDate = widget.event!.startAt;
@@ -63,6 +71,10 @@ class _EventEditScreenState extends State<EventEditScreen> {
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
+    _feeController.dispose();
+    _capacityController.dispose();
+    _locationController.dispose();
+    _groupLineUrlController.dispose();
     super.dispose();
   }
 
@@ -146,6 +158,11 @@ class _EventEditScreenState extends State<EventEditScreen> {
         _selectedTime!.minute,
       );
 
+      final fee = _feeController.text.trim().isEmpty ? null : _feeController.text.trim();
+      final capacity = _capacityController.text.trim().isEmpty ? null : _capacityController.text.trim();
+      final location = _locationController.text.trim().isEmpty ? null : _locationController.text.trim();
+      final groupLineUrl = _groupLineUrlController.text.trim().isEmpty ? null : _groupLineUrlController.text.trim();
+
       if (widget.event == null) {
         // 新規作成
         final newEvent = Event(
@@ -156,6 +173,10 @@ class _EventEditScreenState extends State<EventEditScreen> {
           startAt: startAt,
           campus: _selectedCampus,
           organizationLogoUrl: _currentOrg!.logoUrl,
+          fee: fee,
+          capacity: capacity,
+          location: location,
+          groupLineUrl: groupLineUrl,
         );
         await _firestoreService.createEvent(newEvent);
         if (mounted) {
@@ -172,6 +193,10 @@ class _EventEditScreenState extends State<EventEditScreen> {
           startAt: startAt,
           campus: _selectedCampus,
           organizationLogoUrl: _currentOrg?.logoUrl,
+          fee: fee,
+          capacity: capacity,
+          location: location,
+          groupLineUrl: groupLineUrl,
         );
         await _firestoreService.updateEvent(updatedEvent);
         if (mounted) {
@@ -194,6 +219,29 @@ class _EventEditScreenState extends State<EventEditScreen> {
         });
       }
     }
+  }
+
+  Widget _buildInfoField({
+    required TextEditingController controller,
+    required IconData icon,
+    required String label,
+    required String hint,
+  }) {
+    return TextFormField(
+      controller: controller,
+      decoration: InputDecoration(
+        prefixIcon: Icon(icon, size: 20, color: AppTheme.textSecondary),
+        labelText: label,
+        hintText: hint,
+        hintStyle: const TextStyle(fontSize: 13),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      ),
+    );
   }
 
   @override
@@ -432,6 +480,52 @@ class _EventEditScreenState extends State<EventEditScreen> {
                           ),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 24),
+
+                    const Text(
+                      'イベント情報',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _buildInfoField(
+                      controller: _locationController,
+                      icon: Icons.place_outlined,
+                      label: '場所',
+                      hint: '例: 今出川キャンパス 第1体育館',
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildInfoField(
+                            controller: _feeController,
+                            icon: Icons.payments_outlined,
+                            label: '参加費',
+                            hint: '例: 無料、500円',
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _buildInfoField(
+                            controller: _capacityController,
+                            icon: Icons.people_outline,
+                            label: '人数',
+                            hint: '例: 先着20名',
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    _buildInfoField(
+                      controller: _groupLineUrlController,
+                      icon: Icons.chat_bubble_outline,
+                      label: 'グループLINE URL（承認後に表示）',
+                      hint: '例: https://line.me/ti/g2/xxxx',
                     ),
                     const SizedBox(height: 24),
 
