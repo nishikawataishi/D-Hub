@@ -108,6 +108,7 @@ abstract class Organization with _$Organization {
       campus: Campus.both,
       logoEmoji: '🎨',
       instagramUrl: '',
+      representativeId: id,
     );
   }
 }

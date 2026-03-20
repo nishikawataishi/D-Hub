@@ -149,13 +149,23 @@ class AuthNotifier extends ChangeNotifier {
     } on FirebaseAuthException catch (e) {
       _user = null;
       _status = AuthStatus.unauthenticated;
+      _isManualAuthAction = false;
       notifyListeners();
       return AuthResult.failure(_mapFirebaseError(e.code));
     } catch (e) {
+      // Firestoreドキュメント作成失敗: AuthアカウントをサインアウトしてUIに通知する前に
+      // エラーメッセージを返す（notifyListeners前にreturnすることでSnackBarを表示できる）
+      debugPrint('signUp error: $e');
+      await _auth.signOut();
       _user = null;
-      _status = AuthStatus.unauthenticated;
-      notifyListeners();
-      return AuthResult.failure('アカウント作成に失敗しました');
+      _isManualAuthAction = false;
+      final errorMessage = 'アカウント作成に失敗しました: $e';
+      // 次フレームで状態更新（先にSnackBarを表示させるため）
+      Future.microtask(() {
+        _status = AuthStatus.unauthenticated;
+        notifyListeners();
+      });
+      return AuthResult.failure(errorMessage);
     } finally {
       _isManualAuthAction = false;
     }
@@ -304,18 +314,21 @@ class AuthNotifier extends ChangeNotifier {
     if (user == null) return;
 
     if (isOrganization) {
-      // 団体アカウントとして作成
-      final doc = await _firestore
-          .collection('organizations')
-          .doc(user.uid)
-          .get();
-      if (!doc.exists) {
-        final mockOrg = Organization.empty(user.uid);
-        await _firestore.collection('organizations').doc(user.uid).set(
-              mockOrg.toJson()
-                ..addAll({'createdAt': FieldValue.serverTimestamp()}),
-            );
-      }
+      // 団体アカウントとして作成（get()を省略してset()に直接）
+      await _firestore.collection('organizations').doc(user.uid).set({
+        'name': '団体名未設定',
+        'description': '',
+        'categories': ['culture'],
+        'campus': 'both',
+        'logoEmoji': '🎨',
+        'instagramUrl': '',
+        'groupLineUrl': '',
+        'isOfficial': false,
+        'photoUrls': [],
+        'status': 'pending',
+        'representativeId': user.uid,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
     } else {
       // 学生アカウントの初期化
       final doc = await _firestore.collection('users').doc(user.uid).get();
