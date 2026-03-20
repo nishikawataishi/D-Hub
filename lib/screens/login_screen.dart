@@ -1,8 +1,11 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../services/auth_notifier.dart';
 import '../services/auth_service.dart';
+import 'terms_screen.dart';
+import 'privacy_policy_screen.dart';
 
 /// ログイン画面
 /// 一般メール（Gmail等）でのログイン・新規登録（2層認証の第1層）
@@ -21,6 +24,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   bool _isSignUpMode = false;
   bool _isOrganizationMode = false; // 団体アカウント登録フラグ
+  bool _agreedToTerms = false; // 利用規約・PP同意フラグ
 
   /// メールアドレスのバリデーション
   /// 学生モード新規登録時は同志社大学ドメインを必須にする
@@ -217,13 +221,84 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                   ),
+
+                  // 利用規約・プライバシーポリシー同意チェックボックス（新規登録モード時のみ）
+                  if (_isSignUpMode) ...[
+                    const SizedBox(height: 16),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: Checkbox(
+                            value: _agreedToTerms,
+                            onChanged: (value) {
+                              setState(() => _agreedToTerms = value ?? false);
+                            },
+                            activeColor: AppTheme.primary,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: RichText(
+                            text: TextSpan(
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: AppTheme.textSecondary,
+                              ),
+                              children: [
+                                TextSpan(
+                                  text: '利用規約',
+                                  style: const TextStyle(
+                                    color: AppTheme.primary,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                  recognizer: TapGestureRecognizer()
+                                    ..onTap = () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => const TermsScreen(),
+                                        ),
+                                      );
+                                    },
+                                ),
+                                const TextSpan(text: ' と '),
+                                TextSpan(
+                                  text: 'プライバシーポリシー',
+                                  style: const TextStyle(
+                                    color: AppTheme.primary,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                  recognizer: TapGestureRecognizer()
+                                    ..onTap = () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              const PrivacyPolicyScreen(),
+                                        ),
+                                      );
+                                    },
+                                ),
+                                const TextSpan(text: ' に同意する'),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 32),
 
                   // ログイン / 新規登録ボタン
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _isLoading ? null : _handleSubmit,
+                      onPressed: _isLoading || (_isSignUpMode && !_agreedToTerms)
+                          ? null
+                          : _handleSubmit,
                       child: _isLoading
                           ? const SizedBox(
                               width: 24,
@@ -241,7 +316,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   // モード切り替え
                   TextButton(
                     onPressed: () {
-                      setState(() => _isSignUpMode = !_isSignUpMode);
+                      setState(() {
+                        _isSignUpMode = !_isSignUpMode;
+                        _agreedToTerms = false;
+                      });
                     },
                     child: Text(
                       _isSignUpMode ? 'すでにアカウントをお持ちの方はこちら' : '初めての方はこちら（新規登録）',
