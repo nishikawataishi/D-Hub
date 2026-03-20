@@ -38,7 +38,7 @@ service cloud.firestore {
            'verificationAttempts', 'lastCodeSentAt', 'codeHashedValue']
         );
       allow create: if isOwner(userId);
-      allow delete: if isOwner(userId);
+      allow delete: if isOwner(userId) || isAdmin();
     }
 
     match /organizations/{docId} {
@@ -61,6 +61,9 @@ service cloud.firestore {
                     ((isOwner(resource.data.representativeId) || isOwner(docId)) &&
                     (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) == false ||
                      request.resource.data.status == resource.data.status));
+
+      // 削除：管理者のみ
+      allow delete: if isAdmin();
     }
 
     // ==========================================================
@@ -124,6 +127,17 @@ service cloud.firestore {
                     && request.resource.data.message is string
                     && request.resource.data.message.size() > 0
                     && request.resource.data.message.size() <= 500;
+    }
+
+    // ==========================================================
+    // contacts コレクション（お問い合わせ）
+    // ==========================================================
+    match /contacts/{docId} {
+      // 作成: 認証済みユーザーが自分のUIDを含む問い合わせのみ送信可能
+      allow create: if isAuthenticated() &&
+                    request.resource.data.userId == request.auth.uid;
+      // 読み取り・更新・削除: 管理者のみ
+      allow read, update, delete: if isAdmin();
     }
 
     // ==========================================================

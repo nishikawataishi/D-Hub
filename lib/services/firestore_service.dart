@@ -187,6 +187,7 @@ class FirestoreService {
       isRead: false,
       sentAt: now,
       organizationInstagramUrl: senderOrg.instagramUrl,
+      organizationGroupLineUrl: senderOrg.groupLineUrl,
       organizationLogoUrl: senderOrg.logoUrl,
       targetUserIconUrl: studentProfile?.iconUrl,
     ).toFirestore();
@@ -524,5 +525,60 @@ class FirestoreService {
     }
 
     await batch.commit();
+  }
+
+  // ─── お問い合わせ（Contacts） ───
+
+  /// お問い合わせを送信（contacts コレクションに保存）
+  Future<void> submitContact({
+    required String userId,
+    required String category,
+    required String message,
+  }) async {
+    await _db.collection('contacts').add({
+      'userId': userId,
+      'category': category,
+      'message': message,
+      'status': 'open',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// お問い合わせ一覧を取得（管理者用）
+  Stream<List<Map<String, dynamic>>> getContactsForAdmin({
+    required String status,
+  }) {
+    return _db
+        .collection('contacts')
+        .where('status', isEqualTo: status)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs.map((doc) {
+            final data = doc.data();
+            data['id'] = doc.id;
+            return data;
+          }).toList(),
+        );
+  }
+
+  /// お問い合わせのステータスを更新（管理者用）
+  Future<void> updateContactStatus(String contactId, String status) async {
+    await _db.collection('contacts').doc(contactId).update({
+      'status': status,
+      'respondedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  // ─── アカウント削除（管理者用） ───
+
+  /// 団体アカウントのFirestoreデータを削除
+  Future<void> deleteOrganizationAccount(String id) async {
+    await _db.collection('organizations').doc(id).delete();
+  }
+
+  /// 学生アカウントのFirestoreデータを削除
+  Future<void> deleteStudentAccount(String id) async {
+    await _db.collection('users').doc(id).delete();
   }
 }

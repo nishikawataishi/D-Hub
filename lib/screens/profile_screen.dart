@@ -11,6 +11,7 @@ import 'profile_edit_screen.dart';
 import 'password_change_screen.dart';
 import 'terms_screen.dart';
 import 'privacy_policy_screen.dart';
+import 'contact_screen.dart';
 import 'components/photo_gallery.dart';
 
 /// マイページ画面
@@ -363,6 +364,100 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  /// 退会確認ダイアログ
+  Future<void> _showDeleteAccountDialog(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('退会の確認'),
+        content: const Text(
+          'アカウントを削除すると、プロフィールやスカウト履歴などすべてのデータが失われます。\n\nこの操作は取り消せません。本当に退会しますか？',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('キャンセル'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              '次へ',
+              style: TextStyle(color: AppTheme.error),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    // パスワード再認証ダイアログ
+    final passwordController = TextEditingController();
+    final password = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        bool obscure = true;
+        return StatefulBuilder(
+          builder: (context, setState) => AlertDialog(
+            title: const Text('パスワードを確認'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('退会するには現在のパスワードを入力してください。'),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: passwordController,
+                  obscureText: obscure,
+                  decoration: InputDecoration(
+                    labelText: 'パスワード',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        obscure ? Icons.visibility_off : Icons.visibility,
+                      ),
+                      onPressed: () => setState(() => obscure = !obscure),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, null),
+                child: const Text('キャンセル'),
+              ),
+              TextButton(
+                onPressed: () =>
+                    Navigator.pop(context, passwordController.text),
+                child: const Text(
+                  '退会する',
+                  style: TextStyle(color: AppTheme.error),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    passwordController.dispose();
+
+    if (password == null || password.isEmpty || !context.mounted) return;
+
+    final authNotifier = context.read<AuthNotifier>();
+    final result = await authNotifier.deleteAccount(password);
+
+    if (!context.mounted) return;
+    if (!result.isSuccess) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.message),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+    }
+    // 成功時はAuthNotifierがunauthenticatedに遷移するのでAuthGateが自動的にLoginScreenへ
+  }
+
   /// 設定メニュー
   Widget _buildSettingsMenu(UserProfile profile) {
     return Container(
@@ -408,7 +503,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _SettingsTile(
             icon: Icons.help_outline,
             title: 'ヘルプ・お問い合わせ',
-            onTap: () {},
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const ContactScreen(),
+                ),
+              );
+            },
           ),
           const Divider(height: 1, indent: 56),
           _SettingsTile(
@@ -441,6 +543,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             icon: Icons.logout,
             title: 'ログアウト',
             onTap: () async {
+              final authNotifier = context.read<AuthNotifier>();
               final confirmed = await showDialog<bool>(
                 context: context,
                 builder: (context) => AlertDialog(
@@ -461,10 +564,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ],
                 ),
               );
-              if (confirmed == true && context.mounted) {
-                context.read<AuthNotifier>().signOut();
+              if (confirmed == true) {
+                authNotifier.signOut();
               }
             },
+            isDestructive: true,
+          ),
+          const Divider(height: 1, indent: 56),
+          _SettingsTile(
+            icon: Icons.delete_forever_outlined,
+            title: '退会する',
+            onTap: () => _showDeleteAccountDialog(context),
             isDestructive: true,
           ),
         ],

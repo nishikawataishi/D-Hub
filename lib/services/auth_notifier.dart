@@ -229,6 +229,42 @@ class AuthNotifier extends ChangeNotifier {
     }
   }
 
+  /// アカウント削除（退会）
+  /// 再認証 → Firestoreデータ削除 → Firebase Authアカウント削除
+  Future<AuthResult> deleteAccount(String password) async {
+    final user = _auth.currentUser;
+    if (user == null || user.email == null) {
+      return AuthResult.failure('ログインが必要です');
+    }
+
+    try {
+      // 再認証
+      final credential = EmailAuthProvider.credential(
+        email: user.email!,
+        password: password,
+      );
+      await user.reauthenticateWithCredential(credential);
+
+      final uid = user.uid;
+
+      // Firestoreデータ削除（存在しないドキュメントの削除はエラーにならない）
+      await _firestore.collection('users').doc(uid).delete();
+      await _firestore.collection('organizations').doc(uid).delete();
+
+      // Firebase Auth アカウント削除
+      await user.delete();
+
+      _user = null;
+      _status = AuthStatus.unauthenticated;
+      notifyListeners();
+      return AuthResult.success('アカウントを削除しました');
+    } on FirebaseAuthException catch (e) {
+      return AuthResult.failure(_mapFirebaseError(e.code));
+    } catch (e) {
+      return AuthResult.failure('アカウントの削除に失敗しました');
+    }
+  }
+
   /// パスワードリセットメールを送信
   Future<AuthResult> sendPasswordReset(String email) async {
     try {
