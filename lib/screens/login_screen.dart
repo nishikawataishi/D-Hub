@@ -146,18 +146,10 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   // ロゴ
-                  Container(
+                  Image.asset(
+                    'assets/images/doshisha_mark.png',
                     width: 80,
                     height: 80,
-                    decoration: BoxDecoration(
-                      color: AppTheme.primary.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Icon(
-                      Icons.school_rounded,
-                      size: 40,
-                      color: AppTheme.primary,
-                    ),
                   ),
                   const SizedBox(height: 24),
 
@@ -173,15 +165,38 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    '同志社大学専用\nサークル・ゼミ スカウト',
+                    'D.scoutへようこそ(・ω・)ノ',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 14,
-                      color: AppTheme.textSecondary,
-                      height: 1.5,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary,
                     ),
                   ),
-                  const SizedBox(height: 48),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '団体側も学生側も完全無料！！',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    '当アプリは、同志社・同女生とサークル・ゼミをつなぐスカウトアプリです。'
+                    '団体側は学生のプロフィールを閲覧してスカウトを送り、イベントへの参加を促すことができます。'
+                    '学生側はスカウトの受信・承認や団体との連絡をアプリ上で完結できます。'
+                    'イベントの一括管理もできるよ(´∀｀)',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                      height: 1.6,
+                    ),
+                  ),
+                  const SizedBox(height: 40),
 
                   // メールアドレス入力
                   TextFormField(
