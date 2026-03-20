@@ -1,4 +1,3 @@
-import 'dart:math';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
@@ -7,6 +6,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 ///
 /// 第1層（Firebase Auth: signUp/signIn/signOut）は AuthNotifier に移動済み。
 /// このクラスは大学メールへの確認コード送信・検証のみを担当する。
+/// コード生成・ハッシュ化・検証はすべてCloud Function（サーバー側）で実行される。
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -39,7 +39,8 @@ class AuthService {
     }
   }
 
-  /// 確認コードを生成し、Firestoreに保存してCloud Functionsで送信
+  /// Cloud Functionを呼び出して確認コードを生成・送信
+  /// コード生成・ハッシュ化・保存はすべてサーバー側で実行される
   Future<AuthResult> sendVerificationCode(String universityEmail) async {
     final user = _auth.currentUser;
     if (user == null) {
@@ -54,26 +55,11 @@ class AuthService {
     }
 
     try {
-      // 6桁ランダムコードを生成
-      final code = _generateVerificationCode();
-
-      // Firestoreにコードを保存（有効期限: 30分）
-      await _firestore.collection('users').doc(user.uid).set({
-        'verificationCode': code,
-        'universityEmail': universityEmail.trim().toLowerCase(),
-        'codeExpiresAt': Timestamp.fromDate(
-          DateTime.now().add(const Duration(minutes: 30)),
-        ),
-        'isStudentVerified': false,
-      }, SetOptions(merge: true));
-
-      // Cloud Functionsでメール送信
       final callable = FirebaseFunctions.instance.httpsCallable(
         'sendVerificationCode',
       );
       await callable.call({
         'email': universityEmail.trim().toLowerCase(),
-        'code': code,
       });
 
       return AuthResult.success(
@@ -81,13 +67,17 @@ class AuthService {
       );
     } catch (e) {
       if (e is FirebaseFunctionsException) {
+        if (e.code == 'resource-exhausted') {
+          return AuthResult.failure('コード送信回数の上限に達しました。\nしばらくしてから再度お試しください。');
+        }
         return AuthResult.failure('メールの送信に失敗しました: ${e.message}');
       }
-      return AuthResult.failure('確認コードの生成・送信に失敗しました');
+      return AuthResult.failure('確認コードの送信に失敗しました');
     }
   }
 
-  /// 確認コードを検証し、学生認証を完了
+  /// Cloud Functionを呼び出して確認コードを検証
+  /// ハッシュ比較・試行回数制限はすべてサーバー側で実行される
   Future<AuthResult> verifyCode(String inputCode) async {
     final user = _auth.currentUser;
     if (user == null) {
@@ -95,45 +85,31 @@ class AuthService {
     }
 
     try {
-      final doc = await _firestore.collection('users').doc(user.uid).get();
-      if (!doc.exists) {
-        return AuthResult.failure('認証情報が見つかりません');
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'verifyCode',
+      );
+      final result = await callable.call({
+        'code': inputCode.trim(),
+      });
+
+      final data = result.data as Map<String, dynamic>;
+      if (data['success'] == true) {
+        return AuthResult.success('学生認証が完了しました！');
+      } else {
+        return AuthResult.failure(data['message'] as String? ?? '確認コードが一致しません');
       }
-
-      final data = doc.data()!;
-      final savedCode = data['verificationCode'] as String?;
-      final expiresAt = (data['codeExpiresAt'] as Timestamp?)?.toDate();
-
-      // コードの有効期限チェック
-      if (expiresAt != null && DateTime.now().isAfter(expiresAt)) {
-        return AuthResult.failure('確認コードの有効期限が切れました。\n再度コードを送信してください。');
-      }
-
-      // コード一致チェック
-      if (savedCode != inputCode.trim()) {
-        return AuthResult.failure('確認コードが一致しません');
-      }
-
-      // 学生認証完了！
-      await _firestore.collection('users').doc(user.uid).set({
-        'isStudentVerified': true,
-        'verifiedAt': FieldValue.serverTimestamp(),
-        'verificationCode': FieldValue.delete(), // コード削除
-        'codeExpiresAt': FieldValue.delete(),
-      }, SetOptions(merge: true));
-
-      return AuthResult.success('学生認証が完了しました！🎉');
     } catch (e) {
+      if (e is FirebaseFunctionsException) {
+        if (e.code == 'resource-exhausted') {
+          return AuthResult.failure('認証コードの試行回数上限に達しました。\n新しいコードを送信してください。');
+        }
+        if (e.code == 'deadline-exceeded') {
+          return AuthResult.failure('確認コードの有効期限が切れました。\n再度コードを送信してください。');
+        }
+        return AuthResult.failure(e.message ?? '認証処理に失敗しました');
+      }
       return AuthResult.failure('認証処理に失敗しました');
     }
-  }
-
-  // ─── ユーティリティ ───
-
-  /// 6桁のランダム確認コードを生成
-  String _generateVerificationCode() {
-    final random = Random.secure();
-    return (100000 + random.nextInt(900000)).toString();
   }
 }
 
@@ -141,12 +117,10 @@ class AuthService {
 class AuthResult {
   final bool isSuccess;
   final String message;
-  final String? verificationCode; // MVP: コードを画面表示用に返す
 
   AuthResult._({
     required this.isSuccess,
     required this.message,
-    this.verificationCode,
   });
 
   factory AuthResult.success(String message) =>
@@ -154,7 +128,4 @@ class AuthResult {
 
   factory AuthResult.failure(String message) =>
       AuthResult._(isSuccess: false, message: message);
-
-  factory AuthResult.successWithCode(String message, String code) =>
-      AuthResult._(isSuccess: true, message: message, verificationCode: code);
 }

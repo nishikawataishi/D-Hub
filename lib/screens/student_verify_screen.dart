@@ -1,11 +1,13 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../services/auth_service.dart';
 import '../services/auth_notifier.dart';
 
-/// 学生認証画面（2層認証の第2層）
-/// 同志社・同女の大学メールに確認コードを送信して学生であることを証明する
+/// 学生認証画面（確認コード入力）
+/// Firebase Authの登録メール（大学メール）に確認コードを自動送信し、
+/// コード入力のみで認証を完了する。
 class StudentVerifyScreen extends StatefulWidget {
   const StudentVerifyScreen({super.key});
 
@@ -14,30 +16,62 @@ class StudentVerifyScreen extends StatefulWidget {
 }
 
 class _StudentVerifyScreenState extends State<StudentVerifyScreen> {
-  final _emailController = TextEditingController();
   final _codeController = TextEditingController();
   final _authService = AuthService();
   bool _isLoading = false;
   bool _isCodeSent = false;
+  bool _isSendingCode = false;
+  String? _universityEmail;
 
-  /// 確認コードを送信
-  Future<void> _sendCode() async {
-    final email = _emailController.text.trim();
-    if (email.isEmpty) {
-      _showMessage('大学メールアドレスを入力してください', isError: true);
+  @override
+  void initState() {
+    super.initState();
+    // 画面表示時に自動でコード送信
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _autoSendCode();
+    });
+  }
+
+  /// Firebase Authのメールアドレスを使って自動でコード送信
+  Future<void> _autoSendCode() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.email == null) {
+      _showMessage('ログイン情報が見つかりません', isError: true);
       return;
     }
 
-    setState(() => _isLoading = true);
+    final email = user.email!;
+    setState(() {
+      _universityEmail = email;
+      _isSendingCode = true;
+    });
+
     final result = await _authService.sendVerificationCode(email);
-    setState(() => _isLoading = false);
 
     if (!mounted) return;
+    setState(() => _isSendingCode = false);
 
     if (result.isSuccess) {
-      setState(() {
-        _isCodeSent = true;
-      });
+      setState(() => _isCodeSent = true);
+      _showMessage(result.message, isError: false);
+    } else {
+      _showMessage(result.message, isError: true);
+    }
+  }
+
+  /// コード再送信
+  Future<void> _resendCode() async {
+    if (_universityEmail == null) return;
+
+    setState(() => _isSendingCode = true);
+    final result =
+        await _authService.sendVerificationCode(_universityEmail!);
+
+    if (!mounted) return;
+    setState(() => _isSendingCode = false);
+
+    if (result.isSuccess) {
+      _codeController.clear();
       _showMessage(result.message, isError: false);
     } else {
       _showMessage(result.message, isError: true);
@@ -84,7 +118,6 @@ class _StudentVerifyScreenState extends State<StudentVerifyScreen> {
 
   @override
   void dispose() {
-    _emailController.dispose();
     _codeController.dispose();
     super.dispose();
   }
@@ -144,11 +177,13 @@ class _StudentVerifyScreenState extends State<StudentVerifyScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              const Center(
+              Center(
                 child: Text(
-                  'D.scoutは同志社大学・同志社女子大学の\n学生専用サービスです。\n大学メールで在籍を確認します（初回のみ）。',
+                  _universityEmail != null
+                      ? '$_universityEmail に\n確認コードを送信しました'
+                      : '大学メールに確認コードを送信しています...',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 14,
                     color: AppTheme.textSecondary,
                     height: 1.6,
@@ -157,80 +192,60 @@ class _StudentVerifyScreenState extends State<StudentVerifyScreen> {
               ),
               const SizedBox(height: 32),
 
-              // ステップ1: 大学メール入力
-              _buildStepHeader(1, '大学メールアドレスを入力'),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _emailController,
-                keyboardType: TextInputType.emailAddress,
-                enabled: !_isCodeSent,
-                decoration: const InputDecoration(
-                  hintText: 'xxx@mail2.doshisha.ac.jp',
-                  prefixIcon: Icon(Icons.school_outlined),
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              // 対応ドメインの説明
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppTheme.background,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '対応ドメイン:',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.textSecondary,
+              // コード送信中のローディング
+              if (_isSendingCode) ...[
+                const Center(
+                  child: Column(
+                    children: [
+                      CircularProgressIndicator(color: AppTheme.primary),
+                      SizedBox(height: 16),
+                      Text(
+                        '確認コードを送信中...',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      '• @mail.doshisha.ac.jp（同志社大学）\n'
-                      '• @mail2.doshisha.ac.jp 等（同志社大学）\n'
-                      '• @dwc.doshisha.ac.jp（同志社女子大学）',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: AppTheme.textSecondary,
-                        height: 1.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              if (!_isCodeSent) ...[
-                // コード送信ボタン
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _sendCode,
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : const Text('確認コードを送信'),
+                    ],
                   ),
                 ),
               ],
 
+              // コード入力（送信完了後）
               if (_isCodeSent) ...[
-                const SizedBox(height: 24),
-
-                // ステップ2: コード入力
-                _buildStepHeader(2, '確認コードを入力'),
+                _buildStepHeader('確認コードを入力'),
                 const SizedBox(height: 12),
+
+                // 対応ドメインの説明
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.background,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(
+                        Icons.mail_outline,
+                        size: 16,
+                        color: AppTheme.textSecondary,
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '大学のメールボックス（迷惑メールフォルダ等も）を確認してください',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.textSecondary,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
                 TextField(
                   controller: _codeController,
                   keyboardType: TextInputType.number,
@@ -270,21 +285,28 @@ class _StudentVerifyScreenState extends State<StudentVerifyScreen> {
                 // コード再送信
                 Center(
                   child: TextButton(
-                    onPressed: _isLoading
+                    onPressed: (_isLoading || _isSendingCode)
                         ? null
-                        : () {
-                            setState(() {
-                              _isCodeSent = false;
-                              _codeController.clear();
-                            });
-                          },
+                        : _resendCode,
                     child: const Text(
-                      'メールアドレスを変更する / コードを再送信',
+                      'コードを再送信する',
                       style: TextStyle(
                         color: AppTheme.textSecondary,
                         fontSize: 12,
                       ),
                     ),
+                  ),
+                ),
+              ],
+
+              // コード送信失敗時のリトライ
+              if (!_isCodeSent && !_isSendingCode) ...[
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _autoSendCode,
+                    child: const Text('確認コードを再送信'),
                   ),
                 ),
               ],
@@ -296,7 +318,7 @@ class _StudentVerifyScreenState extends State<StudentVerifyScreen> {
   }
 
   /// ステップヘッダー
-  Widget _buildStepHeader(int step, String label) {
+  Widget _buildStepHeader(String label) {
     return Row(
       children: [
         Container(
@@ -306,14 +328,11 @@ class _StudentVerifyScreenState extends State<StudentVerifyScreen> {
             color: AppTheme.primary,
             borderRadius: BorderRadius.circular(14),
           ),
-          child: Center(
-            child: Text(
-              '$step',
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
-              ),
+          child: const Center(
+            child: Icon(
+              Icons.pin_outlined,
+              color: Colors.white,
+              size: 16,
             ),
           ),
         ),

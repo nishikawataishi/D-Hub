@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../data/mock_data.dart';
@@ -66,6 +67,42 @@ class FirestoreService {
     );
   }
 
+  // ─── 管理者用（Admin） ───
+
+  /// ステータスで絞り込んだ団体一覧を取得
+  Stream<List<Organization>> getOrganizationsByStatus(String status) {
+    return _db
+        .collection('organizations')
+        .where('status', isEqualTo: status)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) =>
+              snapshot.docs.map((doc) => _organizationFromDoc(doc)).toList(),
+        );
+  }
+
+  /// 全団体を取得（管理画面用・作成日時降順）
+  Stream<List<Organization>> getAllOrganizationsForAdmin() {
+    return _db
+        .collection('organizations')
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) =>
+              snapshot.docs.map((doc) => _organizationFromDoc(doc)).toList(),
+        );
+  }
+
+  /// 団体ステータスを更新（管理者用）
+  Future<void> updateOrganizationStatus(String orgId, String status) async {
+    final data = <String, dynamic>{'status': status};
+    if (status == 'verified') {
+      data['verifiedAt'] = FieldValue.serverTimestamp();
+    }
+    await _db.collection('organizations').doc(orgId).update(data);
+  }
+
   // ─── スカウト（Scouts） ───
 
   /// 特定ユーザー宛のスカウトを取得
@@ -90,22 +127,16 @@ class FirestoreService {
     });
   }
 
-  /// スカウトを送信する
+  /// スカウトを送信する（トランザクションで重複チェック + 作成をアトミックに実行）
   Future<void> sendScout({
     required String targetUserId,
     required Organization senderOrg,
     required String message,
   }) async {
-    // 重複送信のチェック: 同じ学生に未読のスカウトが既にある場合はエラー
-    final existingScouts = await _db
-        .collection('scouts')
-        .where('targetUserId', isEqualTo: targetUserId)
-        .where('organizationId', isEqualTo: senderOrg.id)
-        .where('isRead', isEqualTo: false)
-        .get();
-
-    if (existingScouts.docs.isNotEmpty) {
-      throw Exception('すでにこの学生には未読のスカウトを送信済みです。');
+    // メッセージ長バリデーション（Firestoreルールと一致）
+    final trimmedMessage = message.trim();
+    if (trimmedMessage.isEmpty || trimmedMessage.length > 500) {
+      throw Exception('メッセージは1〜500文字で入力してください。');
     }
 
     // 学生の情報を取得してアイコンURLを保持
@@ -113,7 +144,7 @@ class FirestoreService {
 
     final now = DateTime.now();
     final scoutData = Scout(
-      id: '', // Firestoreが自動生成するため空でOKだが、toFirestoreでは保存されない
+      id: '',
       targetUserId: targetUserId,
       organizationId: senderOrg.id,
       organizationName: senderOrg.name,
@@ -121,7 +152,7 @@ class FirestoreService {
       organizationCategory: senderOrg.categories.isNotEmpty
           ? senderOrg.categories.first.label
           : OrgCategory.all.label,
-      message: message,
+      message: trimmedMessage,
       isRead: false,
       sentAt: now,
       organizationInstagramUrl: senderOrg.instagramUrl,
@@ -131,7 +162,22 @@ class FirestoreService {
 
     scoutData['sentAt'] = FieldValue.serverTimestamp();
 
-    await _db.collection('scouts').add(scoutData);
+    // トランザクションで重複チェック + 作成をアトミックに実行
+    await _db.runTransaction((transaction) async {
+      final existingScouts = await _db
+          .collection('scouts')
+          .where('targetUserId', isEqualTo: targetUserId)
+          .where('organizationId', isEqualTo: senderOrg.id)
+          .where('isRead', isEqualTo: false)
+          .get();
+
+      if (existingScouts.docs.isNotEmpty) {
+        throw Exception('すでにこの学生には未読のスカウトを送信済みです。');
+      }
+
+      final newDocRef = _db.collection('scouts').doc();
+      transaction.set(newDocRef, scoutData);
+    });
   }
 
   // ─── イベント（Events） ───
@@ -180,6 +226,47 @@ class FirestoreService {
   /// イベントを削除
   Future<void> deleteEvent(String eventId) async {
     await _db.collection('events').doc(eventId).delete();
+  }
+
+  // ─── タグマスタ（Tags） ───
+
+  /// 全タグをストリームで取得（名前順）
+  Stream<List<Tag>> getTags() {
+    return _db
+        .collection('tags')
+        .orderBy('name')
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => Tag.fromFirestore(doc.data(), doc.id))
+              .toList(),
+        );
+  }
+
+  /// タグをマスタに追加（同名が存在しない場合のみ）
+  /// 既に存在する場合は何もせず既存のタグ名を返す
+  Future<void> addTag(String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+
+    // 同名タグが既に存在するかチェック
+    final existing = await _db
+        .collection('tags')
+        .where('name', isEqualTo: trimmed)
+        .limit(1)
+        .get();
+
+    if (existing.docs.isNotEmpty) return; // 既に存在する場合はスキップ
+
+    await _db.collection('tags').add({
+      'name': trimmed,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// タグをマスタから削除（管理者用）
+  Future<void> deleteTag(String tagId) async {
+    await _db.collection('tags').doc(tagId).delete();
   }
 
   // ─── ユーザープロフィール ───
@@ -233,7 +320,11 @@ class FirestoreService {
   // ─── 初期データ投入（開発用） ───
 
   /// モックデータをFirestoreに投入する（1回だけ実行する開発用関数）
+  /// 本番環境では実行不可
   Future<void> seedData() async {
+    if (!kDebugMode) {
+      throw StateError('seedData()はデバッグモードでのみ実行可能です');
+    }
     final batch = _db.batch();
     final user = _auth.currentUser;
 
@@ -262,6 +353,15 @@ class FirestoreService {
         'description': event.description,
         'startAt': Timestamp.fromDate(event.startAt),
         'campus': event.campus.name,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    }
+
+    // タグマスタデータを投入
+    for (final tag in mockTags) {
+      final docRef = _db.collection('tags').doc(tag.id);
+      batch.set(docRef, {
+        'name': tag.name,
         'createdAt': FieldValue.serverTimestamp(),
       });
     }

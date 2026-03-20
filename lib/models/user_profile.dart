@@ -8,6 +8,7 @@ class UserProfile {
   final Campus mainCampus;
   final List<String> interests;
   final String? iconUrl;
+  final List<String> photoUrls;
 
   UserProfile({
     required this.id,
@@ -17,6 +18,7 @@ class UserProfile {
     required this.mainCampus,
     required this.interests,
     this.iconUrl,
+    this.photoUrls = const [],
   });
 
   factory UserProfile.fromFirestore(Map<String, dynamic> data, String docId) {
@@ -30,6 +32,7 @@ class UserProfile {
           : Campus.imadegawa,
       interests: List<String>.from(data['interests'] ?? []),
       iconUrl: data['iconUrl'],
+      photoUrls: List<String>.from(data['photoUrls'] ?? []),
     );
   }
 
@@ -41,6 +44,7 @@ class UserProfile {
       'mainCampus': mainCampus.name,
       'interests': interests,
       if (iconUrl != null) 'iconUrl': iconUrl,
+      'photoUrls': photoUrls,
     };
   }
 
@@ -51,6 +55,7 @@ class UserProfile {
     Campus? mainCampus,
     List<String>? interests,
     String? iconUrl,
+    List<String>? photoUrls,
   }) {
     return UserProfile(
       id: id,
@@ -60,6 +65,7 @@ class UserProfile {
       mainCampus: mainCampus ?? this.mainCampus,
       interests: interests ?? this.interests,
       iconUrl: iconUrl ?? this.iconUrl,
+      photoUrls: photoUrls ?? this.photoUrls,
     );
   }
 }

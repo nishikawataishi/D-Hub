@@ -6,6 +6,7 @@ import '../models/campus.dart';
 import '../models/user_profile.dart';
 import '../models/organization.dart';
 import '../models/event.dart';
+import '../models/tag.dart';
 
 import '../models/scout.dart';
 
@@ -13,6 +14,7 @@ export '../models/campus.dart';
 export '../models/user_profile.dart';
 export '../models/organization.dart';
 export '../models/event.dart';
+export '../models/tag.dart';
 
 // ============================
 // モックデータインスタンス
@@ -187,3 +189,21 @@ final UserProfile mockUser = UserProfile(
   mainCampus: Campus.imadegawa,
   interests: ['プログラミング', '国際経済', 'バスケ', 'カフェ巡り', '映画鑑賞'],
 );
+
+/// サンプルタグマスタデータ
+final List<Tag> mockTags = [
+  Tag(id: 't1', name: 'プログラミング', createdAt: DateTime(2026, 1, 1)),
+  Tag(id: 't2', name: '国際経済', createdAt: DateTime(2026, 1, 1)),
+  Tag(id: 't3', name: 'バスケ', createdAt: DateTime(2026, 1, 1)),
+  Tag(id: 't4', name: 'カフェ巡り', createdAt: DateTime(2026, 1, 1)),
+  Tag(id: 't5', name: '映画鑑賞', createdAt: DateTime(2026, 1, 1)),
+  Tag(id: 't6', name: 'サッカー', createdAt: DateTime(2026, 1, 1)),
+  Tag(id: 't7', name: 'テニス', createdAt: DateTime(2026, 1, 1)),
+  Tag(id: 't8', name: 'ダンス', createdAt: DateTime(2026, 1, 1)),
+  Tag(id: 't9', name: '音楽', createdAt: DateTime(2026, 1, 1)),
+  Tag(id: 't10', name: 'ボランティア', createdAt: DateTime(2026, 1, 1)),
+  Tag(id: 't11', name: '写真', createdAt: DateTime(2026, 1, 1)),
+  Tag(id: 't12', name: '読書', createdAt: DateTime(2026, 1, 1)),
+  Tag(id: 't13', name: '旅行', createdAt: DateTime(2026, 1, 1)),
+  Tag(id: 't14', name: '料理', createdAt: DateTime(2026, 1, 1)),
+];

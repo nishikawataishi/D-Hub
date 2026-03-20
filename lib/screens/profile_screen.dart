@@ -5,8 +5,10 @@ import '../services/auth_notifier.dart';
 import '../services/firestore_service.dart';
 import '../models/campus.dart';
 import '../models/user_profile.dart';
+import '../models/tag.dart';
 import '../theme/app_theme.dart';
 import 'profile_edit_screen.dart';
+import 'components/photo_gallery.dart';
 
 /// マイページ画面
 /// プロフィール表示、興味関心タグの編集、設定メニュー
@@ -23,7 +25,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   final _firestoreService = FirestoreService();
 
-  /// タグの追加
+  /// タグマスタの一覧（ストリームから取得）
+  List<Tag> _masterTags = [];
+
+  @override
+  void initState() {
+    super.initState();
+    // タグマスタをストリームで購読
+    _firestoreService.getTags().listen((tags) {
+      if (mounted) {
+        setState(() => _masterTags = tags);
+      }
+    });
+  }
+
+  /// タグの追加（マスタにも自動登録）
   Future<void> _addTag(String tag, UserProfile profile) async {
     final trimmed = tag.trim();
     if (trimmed.isEmpty || profile.interests.contains(trimmed)) return;
@@ -31,17 +47,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final newInterests = List<String>.from(profile.interests)..add(trimmed);
     _tagController.clear();
 
-    // Firestore を更新
+    // Firestoreのユーザープロフィールを更新
     await _firestoreService.updateUserProfile(profile.id, {
       'interests': newInterests,
     });
+
+    // マスタに存在しない場合は自動登録
+    await _firestoreService.addTag(trimmed);
   }
 
   /// タグの削除
   Future<void> _removeTag(String tag, UserProfile profile) async {
     final newInterests = List<String>.from(profile.interests)..remove(tag);
 
-    // Firestore を更新
+    // Firestoreを更新
     await _firestoreService.updateUserProfile(profile.id, {
       'interests': newInterests,
     });
@@ -119,25 +138,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       child: Column(
         children: [
-          // アバター
-          Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withAlpha(25),
-              shape: BoxShape.circle,
-              image: profile.iconUrl != null
-                  ? DecorationImage(
-                      image: CachedNetworkImageProvider(profile.iconUrl!),
-                      fit: BoxFit.cover,
-                    )
+          // 写真ギャラリー
+          if (profile.photoUrls.isNotEmpty) ...[
+            PhotoGallery(photoUrls: profile.photoUrls),
+            const SizedBox(height: 14),
+          ] else ...[
+            // アバター（写真がない場合のフォールバック）
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withAlpha(25),
+                shape: BoxShape.circle,
+                image: profile.iconUrl != null
+                    ? DecorationImage(
+                        image: CachedNetworkImageProvider(profile.iconUrl!),
+                        fit: BoxFit.cover,
+                      )
+                    : null,
+              ),
+              child: profile.iconUrl == null
+                  ? const Icon(Icons.person, size: 40, color: AppTheme.primary)
                   : null,
             ),
-            child: profile.iconUrl == null
-                ? const Icon(Icons.person, size: 40, color: AppTheme.primary)
-                : null,
-          ),
-          const SizedBox(height: 14),
+            const SizedBox(height: 14),
+          ],
 
           // 名前
           Text(
@@ -244,22 +269,81 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
 
-          // タグ追加入力（編集モード時のみ）
+          // タグ追加入力（編集モード時のみ・オートコンプリート付き）
           if (_isEditingTags) ...[
             const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
-                  child: TextField(
-                    controller: _tagController,
-                    decoration: const InputDecoration(
-                      hintText: '新しい興味を追加',
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                    ),
-                    onSubmitted: (text) => _addTag(text, profile),
+                  child: RawAutocomplete<String>(
+                    textEditingController: _tagController,
+                    focusNode: FocusNode(),
+                    optionsBuilder: (TextEditingValue textEditingValue) {
+                      if (textEditingValue.text.isEmpty) {
+                        return const Iterable<String>.empty();
+                      }
+                      final query = textEditingValue.text.toLowerCase();
+                      return _masterTags
+                          .map((tag) => tag.name)
+                          .where((name) =>
+                              name.toLowerCase().contains(query) &&
+                              !profile.interests.contains(name))
+                          .toList();
+                    },
+                    fieldViewBuilder: (context, controller, focusNode,
+                        onFieldSubmitted) {
+                      return TextField(
+                        controller: controller,
+                        focusNode: focusNode,
+                        decoration: const InputDecoration(
+                          hintText: '新しい興味を追加（候補から選択 or 自由入力）',
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                        ),
+                        onSubmitted: (text) {
+                          _addTag(text, profile);
+                          onFieldSubmitted();
+                        },
+                      );
+                    },
+                    optionsViewBuilder: (context, onSelected, options) {
+                      return Align(
+                        alignment: Alignment.topLeft,
+                        child: Material(
+                          elevation: 4,
+                          borderRadius: BorderRadius.circular(8),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 200),
+                            child: ListView.builder(
+                              padding: EdgeInsets.zero,
+                              shrinkWrap: true,
+                              itemCount: options.length,
+                              itemBuilder: (context, index) {
+                                final option = options.elementAt(index);
+                                return ListTile(
+                                  dense: true,
+                                  title: Text(
+                                    option,
+                                    style: const TextStyle(fontSize: 14),
+                                  ),
+                                  leading: const Icon(
+                                    Icons.tag,
+                                    size: 18,
+                                    color: AppTheme.primary,
+                                  ),
+                                  onTap: () {
+                                    onSelected(option);
+                                    _addTag(option, profile);
+                                  },
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),

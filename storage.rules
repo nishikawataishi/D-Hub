@@ -19,6 +19,12 @@ service firebase.storage {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated() && request.auth.uid == userId && isImage() && isLessThan5MB();
     }
+
+    // ユーザープロフィール写真（ギャラリー用）
+    match /users/{userId}/photos/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId && isImage() && isLessThan5MB();
+    }
     
     // 団体ロゴ・活動写真
     match /organizations/{orgId}/{folder}/{fileName} {

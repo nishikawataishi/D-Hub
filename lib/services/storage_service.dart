@@ -46,6 +46,64 @@ class StorageService {
     }
   }
 
+  /// ユーザーのプロフィール写真をアップロードする（ギャラリー用）
+  Future<String?> uploadUserPhoto({
+    required String userId,
+    required XFile file,
+  }) async {
+    try {
+      final fileName = '${_uuid.v4()}_${file.name}';
+      final ref = _storage.ref().child('users/$userId/photos/$fileName');
+
+      if (kIsWeb) {
+        final bytes = await file.readAsBytes();
+        final metadata = SettableMetadata(
+          contentType: file.mimeType ?? 'image/jpeg',
+        );
+        await ref.putData(bytes, metadata);
+      } else {
+        final metadata = SettableMetadata(
+          contentType: file.mimeType ?? 'image/jpeg',
+        );
+        await ref.putFile(File(file.path), metadata);
+      }
+
+      return await ref.getDownloadURL();
+    } catch (e) {
+      debugPrint('Error uploading user photo: $e');
+      return null;
+    }
+  }
+
+  /// 団体のプロフィール写真をアップロードする（ギャラリー用）
+  Future<String?> uploadOrgPhoto({
+    required String orgId,
+    required XFile file,
+  }) async {
+    try {
+      final fileName = '${_uuid.v4()}_${file.name}';
+      final ref = _storage.ref().child('organizations/$orgId/photos/$fileName');
+
+      if (kIsWeb) {
+        final bytes = await file.readAsBytes();
+        final metadata = SettableMetadata(
+          contentType: file.mimeType ?? 'image/jpeg',
+        );
+        await ref.putData(bytes, metadata);
+      } else {
+        final metadata = SettableMetadata(
+          contentType: file.mimeType ?? 'image/jpeg',
+        );
+        await ref.putFile(File(file.path), metadata);
+      }
+
+      return await ref.getDownloadURL();
+    } catch (e) {
+      debugPrint('Error uploading org photo: $e');
+      return null;
+    }
+  }
+
   /// ユーザーアイコンをアップロードする
   Future<String?> uploadUserIcon({
     required String userId,

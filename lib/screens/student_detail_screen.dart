@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_theme.dart';
 import '../models/user_profile.dart';
 import '../services/firestore_service.dart';
+import 'components/photo_gallery.dart';
 
 /// 学生プロフィールの詳細閲覧とスカウト送信を行う画面
 class StudentDetailScreen extends StatefulWidget {
@@ -174,18 +175,23 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // アイコン
-            CircleAvatar(
-              radius: 50,
-              backgroundColor: AppTheme.primary.withAlpha(25),
-              backgroundImage: widget.student.iconUrl != null
-                  ? NetworkImage(widget.student.iconUrl!)
-                  : null,
-              child: widget.student.iconUrl == null
-                  ? const Icon(Icons.person, size: 50, color: AppTheme.primary)
-                  : null,
-            ),
-            const SizedBox(height: 16),
+            // 写真ギャラリー or アイコン
+            if (widget.student.photoUrls.isNotEmpty) ...[
+              PhotoGallery(photoUrls: widget.student.photoUrls),
+              const SizedBox(height: 16),
+            ] else ...[
+              CircleAvatar(
+                radius: 50,
+                backgroundColor: AppTheme.primary.withAlpha(25),
+                backgroundImage: widget.student.iconUrl != null
+                    ? NetworkImage(widget.student.iconUrl!)
+                    : null,
+                child: widget.student.iconUrl == null
+                    ? const Icon(Icons.person, size: 50, color: AppTheme.primary)
+                    : null,
+              ),
+              const SizedBox(height: 16),
+            ],
 
             // 名前
             Text(

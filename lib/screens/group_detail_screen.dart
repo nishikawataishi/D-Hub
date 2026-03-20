@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/organization.dart';
 import '../models/event.dart';
 import '../theme/app_theme.dart';
 import '../screens/components/verified_badge.dart';
+import 'components/photo_gallery.dart';
 import '../services/firestore_service.dart';
 import 'event_detail_screen.dart';
 
@@ -62,6 +64,11 @@ class GroupDetailScreen extends StatelessWidget {
                     : null,
               ),
             ),
+            // 写真ギャラリー
+            if (organization.photoUrls.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              PhotoGallery(photoUrls: organization.photoUrls),
+            ],
             const SizedBox(height: 16),
             Center(
               child: Row(
@@ -130,6 +137,38 @@ class GroupDetailScreen extends StatelessWidget {
                 ),
               ),
             ),
+
+            // Instagram リンク
+            if (organization.instagramUrl.trim().isNotEmpty) ...[
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final url = _buildInstagramUrl(
+                      organization.instagramUrl.trim(),
+                    );
+                    final uri = Uri.parse(url);
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(
+                        uri,
+                        mode: LaunchMode.externalApplication,
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.camera_alt_outlined, size: 18),
+                  label: const Text('Instagramを見る'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.textPrimary,
+                    side: const BorderSide(color: AppTheme.border),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 32),
 
             // イベント一覧
@@ -205,6 +244,15 @@ class GroupDetailScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String _buildInstagramUrl(String input) {
+    if (input.startsWith('http://') || input.startsWith('https://')) {
+      return input;
+    }
+    // @付きユーザー名 or ユーザー名のみ
+    final username = input.startsWith('@') ? input.substring(1) : input;
+    return 'https://www.instagram.com/$username';
   }
 
   Widget _buildChip(String label, IconData icon) {

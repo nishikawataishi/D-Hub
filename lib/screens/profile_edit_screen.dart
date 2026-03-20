@@ -6,6 +6,7 @@ import '../services/storage_service.dart';
 import '../services/image_service.dart';
 import '../theme/app_theme.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'components/photo_gallery_editor.dart';
 
 /// プロフィール編集画面
 class ProfileEditScreen extends StatefulWidget {
@@ -29,6 +30,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   bool _isSaving = false;
   bool _isUploadingImage = false;
   String? _iconUrl;
+  late List<String> _photoUrls;
+  final Set<int> _uploadingPhotoIndices = {};
 
   @override
   void initState() {
@@ -42,6 +45,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     _selectedGrade = widget.profile.grade;
     _selectedCampus = widget.profile.mainCampus;
     _iconUrl = widget.profile.iconUrl;
+    _photoUrls = List<String>.from(widget.profile.photoUrls);
   }
 
   @override
@@ -63,6 +67,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         'grade': _selectedGrade,
         'mainCampus': _selectedCampus.name,
         if (_iconUrl != null) 'iconUrl': _iconUrl,
+        'photoUrls': _photoUrls,
       });
 
       if (mounted) {
@@ -125,6 +130,55 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       }
     } finally {
       if (mounted) setState(() => _isUploadingImage = false);
+    }
+  }
+
+  Future<void> _pickAndUploadPhoto(int index) async {
+    try {
+      setState(() => _uploadingPhotoIndices.add(index));
+
+      final finalFile = await ImageService().pickAndProcessImage(
+        maxWidth: 1024,
+        maxHeight: 1024,
+        aspectRatio: null,
+        crop: false,
+      );
+      if (!mounted || finalFile == null) {
+        setState(() => _uploadingPhotoIndices.remove(index));
+        return;
+      }
+
+      final url = await StorageService().uploadUserPhoto(
+        userId: widget.profile.id,
+        file: finalFile,
+      );
+
+      if (url != null && mounted) {
+        setState(() {
+          if (index < _photoUrls.length) {
+            _photoUrls[index] = url;
+          } else {
+            _photoUrls.add(url);
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('写真のアップロードに失敗しました: $e'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _uploadingPhotoIndices.remove(index));
+    }
+  }
+
+  void _removePhoto(int index) {
+    if (index < _photoUrls.length) {
+      setState(() => _photoUrls.removeAt(index));
     }
   }
 
@@ -216,6 +270,15 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                           ),
                         ],
                       ),
+              ),
+              const SizedBox(height: 24),
+
+              // プロフィール写真ギャラリー編集
+              PhotoGalleryEditor(
+                photoUrls: _photoUrls,
+                uploadingIndices: _uploadingPhotoIndices,
+                onAddPhoto: _pickAndUploadPhoto,
+                onRemovePhoto: _removePhoto,
               ),
               const SizedBox(height: 32),
 

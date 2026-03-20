@@ -28,6 +28,11 @@ _Organization _$OrganizationFromJson(Map<String, dynamic> json) =>
       createdAt: json['createdAt'] == null
           ? null
           : DateTime.parse(json['createdAt'] as String),
+      photoUrls:
+          (json['photoUrls'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          const [],
     );
 
 Map<String, dynamic> _$OrganizationToJson(_Organization instance) =>
@@ -48,6 +53,7 @@ Map<String, dynamic> _$OrganizationToJson(_Organization instance) =>
       'verifiedAt': instance.verifiedAt?.toIso8601String(),
       'isOfficial': instance.isOfficial,
       'createdAt': instance.createdAt?.toIso8601String(),
+      'photoUrls': instance.photoUrls,
     };
 
 const _$OrgCategoryEnumMap = {
