@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// D.scout アプリのテーマ定義
+/// D-Hub アプリのテーマ定義
 /// ONE CAREER風の白基調＋インディゴブルーの洗練されたデザイン
 class AppTheme {
   // プライマリカラー（インディゴブルー）

@@ -14,7 +14,7 @@ import 'screens/org_dashboard_screen.dart';
 import 'screens/admin_dashboard_screen.dart';
 import 'services/auth_notifier.dart';
 
-/// D.scout アプリのエントリーポイント
+/// D-Hub アプリのエントリーポイント
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
@@ -49,7 +49,7 @@ class DScoutApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'D.scout',
+      title: 'D-Hub',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       home: const AuthGate(),

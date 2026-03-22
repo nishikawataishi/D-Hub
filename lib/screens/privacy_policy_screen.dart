@@ -25,11 +25,11 @@ class PrivacyPolicyScreen extends StatelessWidget {
   }
 }
 
-const String _privacyPolicyText = '''D.scout プライバシーポリシー
+const String _privacyPolicyText = '''D-Hub プライバシーポリシー
 
 最終更新日：2026年3月20日
 
-D.scout（以下「本サービス」）は、ユーザーの個人情報の保護を重要と考え、以下のとおりプライバシーポリシーを定めます。
+D-Hub（以下「本サービス」）は、ユーザーの個人情報の保護を重要と考え、以下のとおりプライバシーポリシーを定めます。
 
 1. 取得する情報
 本サービスでは、以下の情報を取得します。
