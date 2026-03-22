@@ -16,6 +16,7 @@ class Scout {
   final String? organizationGroupLineUrl;
   final String? organizationLogoUrl;
   final String? targetUserIconUrl;
+  final String? targetUserName;
 
   Scout({
     required this.id,
@@ -32,6 +33,7 @@ class Scout {
     this.organizationGroupLineUrl,
     this.organizationLogoUrl,
     this.targetUserIconUrl,
+    this.targetUserName,
   });
 
   /// FirestoreドキュメントからScoutモデルを生成
@@ -51,6 +53,7 @@ class Scout {
       organizationGroupLineUrl: data['organizationGroupLineUrl'] as String?,
       organizationLogoUrl: data['organizationLogoUrl'] as String?,
       targetUserIconUrl: data['targetUserIconUrl'] as String?,
+      targetUserName: data['targetUserName'] as String?,
     );
   }
 
@@ -71,6 +74,7 @@ class Scout {
       if (organizationLogoUrl != null)
         'organizationLogoUrl': organizationLogoUrl,
       if (targetUserIconUrl != null) 'targetUserIconUrl': targetUserIconUrl,
+      if (targetUserName != null) 'targetUserName': targetUserName,
     };
   }
 }

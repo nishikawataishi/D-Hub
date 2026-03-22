@@ -155,7 +155,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   // タイトル
                   const Text(
-                    'D.scout',
+                    'D-Hub',
                     style: TextStyle(
                       fontSize: 28,
                       fontWeight: FontWeight.w700,
@@ -165,7 +165,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'D.scoutへようこそ(・ω・)ノ',
+                    'D-Hubへようこそ(・ω・)ノ',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 16,
@@ -185,10 +185,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 16),
                   const Text(
-                    '当アプリは、同志社・同女生とサークル・ゼミをつなぐスカウトアプリです。'
-                    '団体側は学生のプロフィールを閲覧してスカウトを送り、イベントへの参加を促すことができます。'
-                    '学生側はスカウトの受信・承認や団体との連絡をアプリ上で完結できます。'
-                    'イベントの一括管理もできるよ(´∀｀)',
+                    '当サービスは同志社・同女生専用の学生とサークル・部活動・ゼミ等を繋ぐプラットフォームです。結構便利だよ(・ω・)ノ',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 12,

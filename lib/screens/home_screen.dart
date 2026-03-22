@@ -50,7 +50,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('D.scout'),
+        title: const Text('D-Hub'),
         actions: [
           IconButton(
             icon: const Icon(Icons.notifications_none_rounded),

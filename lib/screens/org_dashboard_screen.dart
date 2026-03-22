@@ -8,6 +8,7 @@ import '../models/user_profile.dart';
 import '../models/event.dart';
 import '../models/event_application.dart';
 import '../models/organization.dart';
+import '../models/scout.dart';
 import 'components/student_card.dart';
 import 'components/org_profile_edit_tab.dart';
 import 'org_create_screen.dart';
@@ -243,7 +244,131 @@ class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
 
   /// スカウト管理タブ
   Widget _buildScoutManagementTab() {
-    return const Center(child: Text('スカウト送信・履歴管理 (実装予定)'));
+    if (_currentOrg?.status != 'verified') {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.lock_outline,
+              size: 64,
+              color: AppTheme.textSecondary.withOpacity(0.5),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              '審査承認後にスカウト管理が利用可能になります',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final orgId = FirebaseAuth.instance.currentUser?.uid;
+    if (orgId == null) return const SizedBox();
+
+    return StreamBuilder<List<Scout>>(
+      stream: FirestoreService().getScoutsByOrganization(orgId),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Text(
+              'エラーが発生しました\n${snapshot.error}',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppTheme.error),
+            ),
+          );
+        }
+
+        final scouts = snapshot.data ?? [];
+        final totalCount = scouts.length;
+        final readCount = scouts.where((s) => s.isRead).length;
+        final unreadCount = totalCount - readCount;
+
+        if (scouts.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.send_outlined,
+                  size: 64,
+                  color: AppTheme.textSecondary.withOpacity(0.4),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'まだスカウトを送っていません',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  '学生検索タブから気になる学生にスカウトを送りましょう！',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return Column(
+          children: [
+            // サマリーバー
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              color: AppTheme.surface,
+              child: Row(
+                children: [
+                  _ScoutStatChip(
+                    label: '合計',
+                    count: totalCount,
+                    color: AppTheme.primary,
+                    icon: Icons.send_rounded,
+                  ),
+                  const SizedBox(width: 8),
+                  _ScoutStatChip(
+                    label: '既読',
+                    count: readCount,
+                    color: Colors.green,
+                    icon: Icons.done_all_rounded,
+                  ),
+                  const SizedBox(width: 8),
+                  _ScoutStatChip(
+                    label: '未読',
+                    count: unreadCount,
+                    color: Colors.orange,
+                    icon: Icons.mark_email_unread_outlined,
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, color: AppTheme.border),
+            // スカウト履歴リスト
+            Expanded(
+              child: ListView.separated(
+                padding: const EdgeInsets.all(16),
+                itemCount: scouts.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  final scout = scouts[index];
+                  return _ScoutHistoryCard(scout: scout);
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   /// イベント管理タブ
@@ -522,7 +647,7 @@ class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              isPending ? '審査中：承認されるまで機能が制限されます。' : '申請却下：内容を確認し、再申請してください。',
+              isPending ? '審査中：承認されるまで機能が制限されます。審査が終わり次第（24H以内）自動で承認され、フルサービスがご利用頂けます。' : '申請却下：内容を確認し、再申請してください。',
               style: TextStyle(
                 color: isPending ? Colors.amber.shade900 : Colors.red.shade900,
                 fontSize: 13,
@@ -532,6 +657,195 @@ class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// スカウト統計チップ
+class _ScoutStatChip extends StatelessWidget {
+  final String label;
+  final int count;
+  final Color color;
+  final IconData icon;
+
+  const _ScoutStatChip({
+    required this.label,
+    required this.count,
+    required this.color,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 4),
+          Text(
+            '$label $count',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// スカウト履歴カード
+class _ScoutHistoryCard extends StatelessWidget {
+  final Scout scout;
+
+  const _ScoutHistoryCard({required this.scout});
+
+  @override
+  Widget build(BuildContext context) {
+    final sentDate = scout.sentAt;
+    final dateLabel =
+        '${sentDate.year}/${sentDate.month.toString().padLeft(2, '0')}/${sentDate.day.toString().padLeft(2, '0')}';
+
+    // targetUserName が未保存の場合はFirestoreから取得
+    final nameFuture = scout.targetUserName != null
+        ? Future.value(scout.targetUserName!)
+        : FirestoreService()
+            .getUserProfile(scout.targetUserId)
+            .then((p) => p?.name ?? '不明');
+
+    return FutureBuilder<String>(
+      future: nameFuture,
+      builder: (context, nameSnap) {
+        final displayName = nameSnap.data ?? '読み込み中…';
+
+        return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.border),
+      ),
+      padding: const EdgeInsets.all(14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // アイコン
+          CircleAvatar(
+            radius: 24,
+            backgroundColor: AppTheme.primary.withOpacity(0.1),
+            backgroundImage: scout.targetUserIconUrl != null
+                ? NetworkImage(scout.targetUserIconUrl!)
+                : null,
+            child: scout.targetUserIconUrl == null
+                ? const Icon(Icons.person, color: AppTheme.primary, size: 24)
+                : null,
+          ),
+          const SizedBox(width: 12),
+          // 情報
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        displayName,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
+                    // 既読/未読バッジ
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: scout.isRead
+                            ? Colors.green.withOpacity(0.1)
+                            : Colors.orange.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: scout.isRead
+                              ? Colors.green.withOpacity(0.4)
+                              : Colors.orange.withOpacity(0.4),
+                        ),
+                      ),
+                      child: Text(
+                        scout.isRead ? '既読' : '未読',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: scout.isRead ? Colors.green : Colors.orange,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  scout.message,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.textSecondary,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.access_time,
+                      size: 12,
+                      color: AppTheme.textSecondary,
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      dateLabel,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    if (scout.isRead && scout.readAt != null) ...[
+                      const SizedBox(width: 10),
+                      const Icon(
+                        Icons.done_all_rounded,
+                        size: 12,
+                        color: Colors.green,
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        '${scout.readAt!.month}/${scout.readAt!.day} 既読',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.green,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+        );
+      },
     );
   }
 }

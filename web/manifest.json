@@ -1,11 +1,11 @@
 {
-    "name": "d_scout",
-    "short_name": "d_scout",
+    "name": "D-Hub",
+    "short_name": "D-Hub",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#3949AB",
+    "theme_color": "#3949AB",
+    "description": "同志社・同女生専用 | サークル・部活・ゼミとあなたをつなぐマッチングプラットフォーム",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
