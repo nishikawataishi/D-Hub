@@ -195,42 +195,50 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 40),
 
-                  // メールアドレス入力
-                  TextFormField(
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    validator: _validateEmail,
-                    decoration: InputDecoration(
-                      labelText: 'メールアドレス',
-                      hintText: (_isSignUpMode && !_isOrganizationMode)
-                          ? 'xxx@mail2.doshisha.ac.jp'
-                          : 'example@gmail.com',
-                      prefixIcon: const Icon(Icons.email_outlined),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // パスワード入力
-                  TextFormField(
-                    controller: _passwordController,
-                    obscureText: !_isPasswordVisible,
-                    validator: _validatePassword,
-                    decoration: InputDecoration(
-                      labelText: 'パスワード',
-                      hintText: '6文字以上',
-                      prefixIcon: const Icon(Icons.lock_outline),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _isPasswordVisible
-                              ? Icons.visibility_off
-                              : Icons.visibility,
+                  // メールアドレス・パスワード入力（自動入力対応）
+                  AutofillGroup(
+                    child: Column(
+                      children: [
+                        TextFormField(
+                          controller: _emailController,
+                          keyboardType: TextInputType.emailAddress,
+                          autofillHints: const [AutofillHints.email],
+                          validator: _validateEmail,
+                          decoration: InputDecoration(
+                            labelText: 'メールアドレス',
+                            hintText: (_isSignUpMode && !_isOrganizationMode)
+                                ? 'xxx@mail2.doshisha.ac.jp'
+                                : 'example@gmail.com',
+                            prefixIcon: const Icon(Icons.email_outlined),
+                          ),
                         ),
-                        onPressed: () {
-                          setState(() {
-                            _isPasswordVisible = !_isPasswordVisible;
-                          });
-                        },
-                      ),
+                        const SizedBox(height: 16),
+                        TextFormField(
+                          controller: _passwordController,
+                          obscureText: !_isPasswordVisible,
+                          autofillHints: _isSignUpMode
+                              ? const [AutofillHints.newPassword]
+                              : const [AutofillHints.password],
+                          validator: _validatePassword,
+                          decoration: InputDecoration(
+                            labelText: 'パスワード',
+                            hintText: '6文字以上',
+                            prefixIcon: const Icon(Icons.lock_outline),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _isPasswordVisible
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _isPasswordVisible = !_isPasswordVisible;
+                                });
+                              },
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
 
