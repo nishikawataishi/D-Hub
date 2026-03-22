@@ -715,7 +715,19 @@ class _ScoutHistoryCard extends StatelessWidget {
     final dateLabel =
         '${sentDate.year}/${sentDate.month.toString().padLeft(2, '0')}/${sentDate.day.toString().padLeft(2, '0')}';
 
-    return Container(
+    // targetUserName が未保存の場合はFirestoreから取得
+    final nameFuture = scout.targetUserName != null
+        ? Future.value(scout.targetUserName!)
+        : FirestoreService()
+            .getUserProfile(scout.targetUserId)
+            .then((p) => p?.name ?? '不明');
+
+    return FutureBuilder<String>(
+      future: nameFuture,
+      builder: (context, nameSnap) {
+        final displayName = nameSnap.data ?? '読み込み中…';
+
+        return Container(
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(12),
@@ -746,7 +758,7 @@ class _ScoutHistoryCard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        scout.targetUserName ?? '学生',
+                        displayName,
                         style: const TextStyle(
                           fontWeight: FontWeight.w600,
                           fontSize: 15,
@@ -832,6 +844,8 @@ class _ScoutHistoryCard extends StatelessWidget {
           ),
         ],
       ),
+        );
+      },
     );
   }
 }
