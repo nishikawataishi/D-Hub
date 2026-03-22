@@ -216,30 +216,52 @@ class _StudentVerifyScreenState extends State<StudentVerifyScreen> {
                 _buildStepHeader('確認コードを入力'),
                 const SizedBox(height: 12),
 
-                // 対応ドメインの説明
+                // 有効期限・注意事項の案内
                 Container(
-                  padding: const EdgeInsets.all(10),
+                  padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: AppTheme.background,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Row(
+                  child: const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.mail_outline,
-                        size: 16,
-                        color: AppTheme.textSecondary,
-                      ),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          '大学のメールボックス（迷惑メールフォルダ等も）を確認してください',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppTheme.textSecondary,
-                            height: 1.4,
+                      Row(
+                        children: [
+                          Icon(Icons.mail_outline, size: 16, color: AppTheme.textSecondary),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '大学のメールボックス（迷惑メールフォルダも）を確認してください',
+                              style: TextStyle(fontSize: 12, color: AppTheme.textSecondary, height: 1.4),
+                            ),
                           ),
-                        ),
+                        ],
+                      ),
+                      SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Icon(Icons.timer_outlined, size: 16, color: Colors.orange),
+                          SizedBox(width: 8),
+                          Text(
+                            'このコードの有効期限は30分です',
+                            style: TextStyle(fontSize: 12, color: Colors.orange, fontWeight: FontWeight.w500),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 8),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.help_outline, size: 16, color: AppTheme.textSecondary),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'コードが届かない場合は、数分待ってから「コードを再送信する」をタップしてください。それでも届かない場合はお問い合わせください。',
+                              style: TextStyle(fontSize: 12, color: AppTheme.textSecondary, height: 1.4),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),

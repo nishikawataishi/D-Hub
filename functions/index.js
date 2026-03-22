@@ -5,6 +5,7 @@ const nodemailer = require("nodemailer");
 const crypto = require("crypto");
 const admin = require("firebase-admin");
 const { Timestamp, FieldValue } = require("firebase-admin/firestore");
+const { getAuth } = require("firebase-admin/auth");
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -237,4 +238,48 @@ exports.verifyCode = onCall(async (request) => {
     });
 
     return result;
+});
+
+/**
+ * 管理者カスタムクレームを付与する Cloud Function
+ * 既存の管理者のみが他ユーザーに管理者権限を付与できる
+ */
+exports.setAdminClaim = onCall(async (request) => {
+    if (!request.auth) {
+        throw new HttpsError("unauthenticated", "ログインが必要です。");
+    }
+    if (!request.auth.token.admin) {
+        throw new HttpsError("permission-denied", "管理者権限が必要です。");
+    }
+
+    const { uid } = request.data;
+    if (!uid || typeof uid !== "string" || uid.trim().length === 0) {
+        throw new HttpsError("invalid-argument", "対象ユーザーのUIDが必要です。");
+    }
+
+    await getAuth().setCustomUserClaims(uid.trim(), { admin: true });
+    logger.info(`Admin claim granted to uid: ${uid} by admin: ${request.auth.uid}`);
+    return { success: true };
+});
+
+/**
+ * 管理者カスタムクレームを剥奪する Cloud Function
+ * 既存の管理者のみが実行可能
+ */
+exports.removeAdminClaim = onCall(async (request) => {
+    if (!request.auth) {
+        throw new HttpsError("unauthenticated", "ログインが必要です。");
+    }
+    if (!request.auth.token.admin) {
+        throw new HttpsError("permission-denied", "管理者権限が必要です。");
+    }
+
+    const { uid } = request.data;
+    if (!uid || typeof uid !== "string" || uid.trim().length === 0) {
+        throw new HttpsError("invalid-argument", "対象ユーザーのUIDが必要です。");
+    }
+
+    await getAuth().setCustomUserClaims(uid.trim(), { admin: false });
+    logger.info(`Admin claim removed from uid: ${uid} by admin: ${request.auth.uid}`);
+    return { success: true };
 });

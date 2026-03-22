@@ -15,7 +15,7 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() &&
-        request.auth.token.email in ['admin@dscout.app'];
+        request.auth.token.admin == true;
     }
 
     // 呼び出し元の団体が審査承認済みかチェック
@@ -146,8 +146,8 @@ service cloud.firestore {
     match /tags/{docId} {
       // 認証済みユーザーなら誰でも読み取り可能
       allow read: if isAuthenticated();
-      // 認証済みユーザーなら誰でもタグを追加可能
-      allow create: if isAuthenticated();
+      // タグの追加は承認済み団体または管理者のみ
+      allow create: if isVerifiedOrg() || isAdmin();
       // 削除は管理者のみ
       allow delete: if isAdmin();
       // 更新は管理者のみ

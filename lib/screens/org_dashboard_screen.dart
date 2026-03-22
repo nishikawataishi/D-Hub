@@ -647,7 +647,9 @@ class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              isPending ? '審査中：承認されるまで機能が制限されます。審査が終わり次第（24H以内）自動で承認され、フルサービスがご利用頂けます。' : '申請却下：内容を確認し、再申請してください。',
+              isPending
+                  ? '審査中：承認されるまで機能が制限されます。審査が終わり次第（24H以内）自動で承認され、フルサービスがご利用頂けます。'
+                  : '申請却下：以下を確認の上、プロフィールを修正して再申請してください。\n①団体名・説明が具体的に記載されているか\n②活動内容がわかる写真が設定されているか\n③Instagram URLなどの連絡先が設定されているか\nご不明な点はお問い合わせください。',
               style: TextStyle(
                 color: isPending ? Colors.amber.shade900 : Colors.red.shade900,
                 fontSize: 13,

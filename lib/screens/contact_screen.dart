@@ -125,6 +125,9 @@ class _ContactScreenState extends State<ContactScreen> {
                   if (v.trim().length < 10) {
                     return '10文字以上入力してください';
                   }
+                  if (v.trim().length > 2000) {
+                    return '2000文字以内で入力してください';
+                  }
                   return null;
                 },
                 decoration: InputDecoration(

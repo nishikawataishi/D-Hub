@@ -371,7 +371,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
       builder: (context) => AlertDialog(
         title: const Text('退会の確認'),
         content: const Text(
-          'アカウントを削除すると、プロフィールやスカウト履歴などすべてのデータが失われます。\n\nこの操作は取り消せません。本当に退会しますか？',
+          'アカウントを削除すると、以下のデータが即座に完全削除されます。\n\n'
+          '・プロフィール情報（名前・学部・写真など）\n'
+          '・スカウト受信履歴\n'
+          '・イベント申し込み履歴\n\n'
+          '削除後の復元はできません。また、同じメールアドレスで再登録することは可能です。\n\n'
+          '本当に退会しますか？',
         ),
         actions: [
           TextButton(

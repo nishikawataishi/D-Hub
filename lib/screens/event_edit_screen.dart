@@ -337,6 +337,9 @@ class _EventEditScreenState extends State<EventEditScreen> {
                         if (value == null || value.trim().isEmpty) {
                           return 'タイトルを入力してください';
                         }
+                        if (value.trim().length > 100) {
+                          return '100文字以内で入力してください';
+                        }
                         return null;
                       },
                     ),
@@ -370,6 +373,9 @@ class _EventEditScreenState extends State<EventEditScreen> {
                       validator: (value) {
                         if (value == null || value.trim().isEmpty) {
                           return '詳細を入力してください';
+                        }
+                        if (value.trim().length > 2000) {
+                          return '2000文字以内で入力してください';
                         }
                         return null;
                       },

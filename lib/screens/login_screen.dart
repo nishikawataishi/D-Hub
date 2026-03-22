@@ -27,6 +27,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isPasswordVisible = false;
   bool _isLoading = false;
   bool _isSignUpMode = false;
+  DateTime? _lastPasswordResetSent;
   bool _isOrganizationMode = false; // 団体アカウント登録フラグ
   bool _agreedToTerms = false; // 利用規約・PP同意フラグ
 
@@ -53,8 +54,17 @@ class _LoginScreenState extends State<LoginScreen> {
     if (value == null || value.isEmpty) {
       return 'パスワードを入力してください';
     }
-    if (value.length < 6) {
-      return 'パスワードは6文字以上で入力してください';
+    if (_isSignUpMode) {
+      if (value.length < 8) {
+        return 'パスワードは8文字以上で入力してください';
+      }
+      if (!RegExp(r'[a-zA-Z]').hasMatch(value) || !RegExp(r'[0-9]').hasMatch(value)) {
+        return 'パスワードは英字と数字を両方含めてください';
+      }
+    } else {
+      if (value.length < 6) {
+        return 'パスワードを入力してください';
+      }
     }
     return null;
   }
@@ -106,7 +116,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  /// パスワードリセット処理
+  /// パスワードリセット処理（60秒のクライアント側レート制限付き）
   Future<void> _handlePasswordReset() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) {
@@ -114,9 +124,21 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
+    if (_lastPasswordResetSent != null) {
+      final elapsed = DateTime.now().difference(_lastPasswordResetSent!);
+      if (elapsed.inSeconds < 60) {
+        final remaining = 60 - elapsed.inSeconds;
+        _showMessage('${remaining}秒後に再送信できます', isError: true);
+        return;
+      }
+    }
+
     setState(() => _isLoading = true);
     final authNotifier = context.read<AuthNotifier>();
     final result = await authNotifier.sendPasswordReset(email);
+    if (result.isSuccess) {
+      _lastPasswordResetSent = DateTime.now();
+    }
     setState(() => _isLoading = false);
 
     if (!mounted) return;
@@ -232,7 +254,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           validator: _validatePassword,
                           decoration: InputDecoration(
                             labelText: 'パスワード',
-                            hintText: '6文字以上',
+                            hintText: _isSignUpMode ? '8文字以上・英字と数字を含む' : 'パスワードを入力',
                             prefixIcon: const Icon(Icons.lock_outline),
                             suffixIcon: IconButton(
                               icon: Icon(
@@ -405,7 +427,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ],
 
                   // パスワードリセット（ログインモード時のみ）
-                  if (!_isSignUpMode)
+                  if (!_isSignUpMode) ...[
                     TextButton(
                       onPressed: _isLoading ? null : _handlePasswordReset,
                       child: const Text(
@@ -416,6 +438,15 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                     ),
+                    const Text(
+                      'ログインに複数回失敗するとアカウントが一時的にロックされます',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
 
                   // 注意書き（学生新規登録モード時のみ表示）

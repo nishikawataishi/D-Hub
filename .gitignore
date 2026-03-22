@@ -61,3 +61,25 @@ emulator.log
 lint_results.txt
 analyze_*.txt
 *.log
+debug_out.txt
+emulator_log.txt
+
+# Node.js
+node_modules/
+functions/node_modules/
+package-lock.json
+
+# Firebase cache
+.firebase/
+
+# Claude Code local files
+.claude/
+
+# Large binaries / JDK
+jdk-*/
+*.zip
+*.tar.gz
+
+# Miscellaneous local files
+sp-*.png
+scripts/
