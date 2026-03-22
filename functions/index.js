@@ -131,12 +131,12 @@ exports.sendVerificationCode = onCall(
     const mailOptions = {
         from: `"D.scout 運営" <${SMTP_USER.value()}>`,
         to: normalizedEmail,
-        subject: "【D.scout】学生認証コードのお知らせ",
-        text: `D.scout をご利用いただきありがとうございます。\n\n以下の6桁の認証コードをアプリに入力して、学生認証を完了してください。\n\n認証コード: ${code}\n\n※このコードの有効期限は${CODE_EXPIRY_MINUTES}分です。\n※心当たりがない場合は、このメールを破棄してください。`,
+        subject: "【D-Hub】学生認証コードのお知らせ",
+        text: `D-Hub をご利用いただきありがとうございます。\n\n以下の6桁の認証コードをアプリに入力して、学生認証を完了してください。\n\n認証コード: ${code}\n\n※このコードの有効期限は${CODE_EXPIRY_MINUTES}分です。\n※心当たりがない場合は、このメールを破棄してください。`,
         html: `
         <div style="font-family: sans-serif; color: #333;">
-            <h2>D.scout 学生認証</h2>
-            <p>D.scout をご利用いただきありがとうございます。</p>
+            <h2>D-Hub 学生認証</h2>
+            <p>D-Hub をご利用いただきありがとうございます。</p>
             <p>以下の6桁の認証コードをアプリに入力して、学生認証を完了してください。</p>
             <div style="padding: 16px; background-color: #f4f4f4; border-radius: 8px; font-size: 24px; font-weight: bold; letter-spacing: 4px; text-align: center;">
                 ${code}
