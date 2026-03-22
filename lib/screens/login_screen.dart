@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../services/auth_notifier.dart';
@@ -80,6 +81,8 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = false);
 
     if (result.isSuccess) {
+      // Safari等にパスワード保存を促す
+      TextInput.finishAutofillContext(shouldSave: true);
       // 成功時、手動での画面遷移は行わない。
       // AuthNotifierの状態変更 → AuthGate (Consumer) が自動的に画面を切り替える。
       if (_isSignUpMode) {
@@ -92,6 +95,7 @@ class _LoginScreenState extends State<LoginScreen> {
         _showMessage('ログインしました', isError: false);
       }
     } else {
+      TextInput.finishAutofillContext(shouldSave: false);
       _showMessage(result.message, isError: true);
     }
   }
