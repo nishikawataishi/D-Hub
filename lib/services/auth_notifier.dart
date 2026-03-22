@@ -17,9 +17,6 @@ enum AuthStatus {
   error,             // エラー → リトライ画面
 }
 
-/// 管理者メールアドレスの許可リスト
-const adminEmails = ['admin@dscout.app'];
-
 /// アプリ全体の認証状態を管理するNotifier
 ///
 /// Firebase AuthのストリームとFirestoreのユーザーデータを統合し、
@@ -64,12 +61,16 @@ class AuthNotifier extends ChangeNotifier {
 
   /// Firestoreからアカウント種別と認証状態を判定
   Future<void> _resolveUserStatus(String uid) async {
-    // 管理者メールアドレスチェック（Firestoreアクセス不要）
-    final email = _user?.email;
-    if (email != null && adminEmails.contains(email)) {
-      _status = AuthStatus.admin;
-      notifyListeners();
-      return;
+    // カスタムクレームで管理者チェック（IDトークンを強制更新して最新クレームを取得）
+    try {
+      final idTokenResult = await _user?.getIdTokenResult(true);
+      if (idTokenResult?.claims?['admin'] == true) {
+        _status = AuthStatus.admin;
+        notifyListeners();
+        return;
+      }
+    } catch (e) {
+      debugPrint('AuthNotifier: custom claims check error: $e');
     }
 
     // 最大2回試行（初回 + 1秒後にリトライ）
@@ -128,13 +129,6 @@ class AuthNotifier extends ChangeNotifier {
         password: password,
       );
       _user = _auth.currentUser;
-
-      // 管理者メールの場合はドキュメント作成不要
-      if (_user?.email != null && adminEmails.contains(_user!.email)) {
-        _status = AuthStatus.admin;
-        notifyListeners();
-        return AuthResult.success('管理者としてログインしました');
-      }
 
       // Firestoreドキュメント作成を完了させてから状態を更新
       await _createUserDocument(isOrganization: isOrganization);
@@ -358,7 +352,7 @@ class AuthNotifier extends ChangeNotifier {
       case 'weak-password':
         return 'パスワードが弱すぎます。6文字以上にしてください';
       case 'too-many-requests':
-        return 'ログイン試行回数が多すぎます。\nしばらくしてからお試しください';
+        return 'ログイン試行回数が多すぎるため、アカウントが一時的にロックされました。\nしばらく時間をおいてから再試行するか、パスワードリセットをご利用ください。';
       case 'user-disabled':
         return 'このアカウントは無効化されています';
       case 'network-request-failed':

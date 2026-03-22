@@ -26,11 +26,11 @@
   <meta property="og:description" content="同志社・同女生専用 | サークル・部活・ゼミとあなたをつなぐマッチングプラットフォーム">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://d-hub-link.com">
-  <meta property="og:image" content="https://d-hub-link.com/icons/Icon-512.png">
+  <meta property="og:image" content="https://d-hub-link.com/icons/Icon-512.png?v=2">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="D-Hub">
   <meta name="twitter:description" content="同志社・同女生専用 | サークル・部活・ゼミとあなたをつなぐマッチングプラットフォーム">
-  <meta name="twitter:image" content="https://d-hub-link.com/icons/Icon-512.png">
+  <meta name="twitter:image" content="https://d-hub-link.com/icons/Icon-512.png?v=2">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
@@ -44,9 +44,23 @@
   <title>D-Hub</title>
   <link rel="manifest" href="manifest.json">
 
+  <!-- パスワード保存 (Credential Management API) -->
+  <script>
+    window.saveCredential = function(id, password) {
+      if (window.PasswordCredential) {
+        var cred = new PasswordCredential({ id: id, password: password });
+        navigator.credentials.store(cred);
+      }
+    };
+  </script>
+
   <!-- image_cropper_for_web dependencies -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.css"
+        integrity="sha384-xUcM1uANmMtyPmRI7rp7V9fXccVjh0pKoFyQ+aYqmsyTcnDYB0w/h/OhcDu8xqUx"
+        crossorigin="anonymous" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"
+          integrity="sha384-r+ljwOAhwY4/kdyzMnuBg7MEVoWpTMp5EYUDntB/E9qzNwL9dAEcNrb2XaV+mJc2"
+          crossorigin="anonymous"></script>
 </head>
 
 <body>

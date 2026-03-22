@@ -1,5 +1,9 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:js' as js;
 import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../services/auth_notifier.dart';
@@ -23,6 +27,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isPasswordVisible = false;
   bool _isLoading = false;
   bool _isSignUpMode = false;
+  DateTime? _lastPasswordResetSent;
   bool _isOrganizationMode = false; // 団体アカウント登録フラグ
   bool _agreedToTerms = false; // 利用規約・PP同意フラグ
 
@@ -49,8 +54,17 @@ class _LoginScreenState extends State<LoginScreen> {
     if (value == null || value.isEmpty) {
       return 'パスワードを入力してください';
     }
-    if (value.length < 6) {
-      return 'パスワードは6文字以上で入力してください';
+    if (_isSignUpMode) {
+      if (value.length < 8) {
+        return 'パスワードは8文字以上で入力してください';
+      }
+      if (!RegExp(r'[a-zA-Z]').hasMatch(value) || !RegExp(r'[0-9]').hasMatch(value)) {
+        return 'パスワードは英字と数字を両方含めてください';
+      }
+    } else {
+      if (value.length < 6) {
+        return 'パスワードを入力してください';
+      }
     }
     return null;
   }
@@ -80,6 +94,11 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = false);
 
     if (result.isSuccess) {
+      // Safari等にパスワード保存を促す
+      TextInput.finishAutofillContext(shouldSave: true);
+      if (kIsWeb) {
+        js.context.callMethod('saveCredential', [email, password]);
+      }
       // 成功時、手動での画面遷移は行わない。
       // AuthNotifierの状態変更 → AuthGate (Consumer) が自動的に画面を切り替える。
       if (_isSignUpMode) {
@@ -92,11 +111,12 @@ class _LoginScreenState extends State<LoginScreen> {
         _showMessage('ログインしました', isError: false);
       }
     } else {
+      TextInput.finishAutofillContext(shouldSave: false);
       _showMessage(result.message, isError: true);
     }
   }
 
-  /// パスワードリセット処理
+  /// パスワードリセット処理（60秒のクライアント側レート制限付き）
   Future<void> _handlePasswordReset() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) {
@@ -104,9 +124,21 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
+    if (_lastPasswordResetSent != null) {
+      final elapsed = DateTime.now().difference(_lastPasswordResetSent!);
+      if (elapsed.inSeconds < 60) {
+        final remaining = 60 - elapsed.inSeconds;
+        _showMessage('${remaining}秒後に再送信できます', isError: true);
+        return;
+      }
+    }
+
     setState(() => _isLoading = true);
     final authNotifier = context.read<AuthNotifier>();
     final result = await authNotifier.sendPasswordReset(email);
+    if (result.isSuccess) {
+      _lastPasswordResetSent = DateTime.now();
+    }
     setState(() => _isLoading = false);
 
     if (!mounted) return;
@@ -195,42 +227,50 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 40),
 
-                  // メールアドレス入力
-                  TextFormField(
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    validator: _validateEmail,
-                    decoration: InputDecoration(
-                      labelText: 'メールアドレス',
-                      hintText: (_isSignUpMode && !_isOrganizationMode)
-                          ? 'xxx@mail2.doshisha.ac.jp'
-                          : 'example@gmail.com',
-                      prefixIcon: const Icon(Icons.email_outlined),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // パスワード入力
-                  TextFormField(
-                    controller: _passwordController,
-                    obscureText: !_isPasswordVisible,
-                    validator: _validatePassword,
-                    decoration: InputDecoration(
-                      labelText: 'パスワード',
-                      hintText: '6文字以上',
-                      prefixIcon: const Icon(Icons.lock_outline),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _isPasswordVisible
-                              ? Icons.visibility_off
-                              : Icons.visibility,
+                  // メールアドレス・パスワード入力（自動入力対応）
+                  AutofillGroup(
+                    child: Column(
+                      children: [
+                        TextFormField(
+                          controller: _emailController,
+                          keyboardType: TextInputType.emailAddress,
+                          autofillHints: const [AutofillHints.email],
+                          validator: _validateEmail,
+                          decoration: InputDecoration(
+                            labelText: 'メールアドレス',
+                            hintText: (_isSignUpMode && !_isOrganizationMode)
+                                ? 'xxx@mail2.doshisha.ac.jp'
+                                : 'example@gmail.com',
+                            prefixIcon: const Icon(Icons.email_outlined),
+                          ),
                         ),
-                        onPressed: () {
-                          setState(() {
-                            _isPasswordVisible = !_isPasswordVisible;
-                          });
-                        },
-                      ),
+                        const SizedBox(height: 16),
+                        TextFormField(
+                          controller: _passwordController,
+                          obscureText: !_isPasswordVisible,
+                          autofillHints: _isSignUpMode
+                              ? const [AutofillHints.newPassword]
+                              : const [AutofillHints.password],
+                          validator: _validatePassword,
+                          decoration: InputDecoration(
+                            labelText: 'パスワード',
+                            hintText: _isSignUpMode ? '8文字以上・英字と数字を含む' : 'パスワードを入力',
+                            prefixIcon: const Icon(Icons.lock_outline),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _isPasswordVisible
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _isPasswordVisible = !_isPasswordVisible;
+                                });
+                              },
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
 
@@ -387,7 +427,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ],
 
                   // パスワードリセット（ログインモード時のみ）
-                  if (!_isSignUpMode)
+                  if (!_isSignUpMode) ...[
                     TextButton(
                       onPressed: _isLoading ? null : _handlePasswordReset,
                       child: const Text(
@@ -398,6 +438,15 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                     ),
+                    const Text(
+                      'ログインに複数回失敗するとアカウントが一時的にロックされます',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
 
                   // 注意書き（学生新規登録モード時のみ表示）

@@ -117,8 +117,11 @@ class _PasswordChangeScreenState extends State<PasswordChangeScreen> {
                   if (value == null || value.isEmpty) {
                     return '新しいパスワードを入力してください';
                   }
-                  if (value.length < 6) {
-                    return 'パスワードは6文字以上にしてください';
+                  if (value.length < 8) {
+                    return 'パスワードは8文字以上にしてください';
+                  }
+                  if (!RegExp(r'[a-zA-Z]').hasMatch(value) || !RegExp(r'[0-9]').hasMatch(value)) {
+                    return '英字と数字を両方含めてください';
                   }
                   return null;
                 },

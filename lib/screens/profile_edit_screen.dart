@@ -273,6 +273,30 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
               ),
               const SizedBox(height: 24),
 
+              // 公開範囲の説明
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
+                ),
+                child: const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline, size: 16, color: AppTheme.primary),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'プロフィール情報（名前・学部・写真・タグなど）は、審査承認済みのサークル・部活・ゼミ等の団体に公開されます。他の学生には公開されません。',
+                        style: TextStyle(fontSize: 12, color: AppTheme.primary, height: 1.5),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+
               // プロフィール写真ギャラリー編集
               PhotoGalleryEditor(
                 photoUrls: _photoUrls,
