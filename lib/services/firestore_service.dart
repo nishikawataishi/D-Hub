@@ -122,6 +122,20 @@ class FirestoreService {
 
   // ─── スカウト（Scouts） ───
 
+  /// 特定団体が送信したスカウト一覧を取得（団体側履歴管理用）
+  Stream<List<Scout>> getScoutsByOrganization(String orgId) {
+    return _db
+        .collection('scouts')
+        .where('organizationId', isEqualTo: orgId)
+        .orderBy('sentAt', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => Scout.fromFirestore(doc.data(), doc.id))
+              .toList(),
+        );
+  }
+
   /// 特定ユーザー宛のスカウトを取得
   Stream<List<Scout>> getScoutsForUser(String userId) {
     return _db
@@ -190,6 +204,7 @@ class FirestoreService {
       organizationGroupLineUrl: senderOrg.groupLineUrl,
       organizationLogoUrl: senderOrg.logoUrl,
       targetUserIconUrl: studentProfile?.iconUrl,
+      targetUserName: studentProfile?.name,
     ).toFirestore();
 
     scoutData['sentAt'] = FieldValue.serverTimestamp();
