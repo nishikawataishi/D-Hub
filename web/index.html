@@ -44,6 +44,16 @@
   <title>D-Hub</title>
   <link rel="manifest" href="manifest.json">
 
+  <!-- パスワード保存 (Credential Management API) -->
+  <script>
+    window.saveCredential = function(id, password) {
+      if (window.PasswordCredential) {
+        var cred = new PasswordCredential({ id: id, password: password });
+        navigator.credentials.store(cred);
+      }
+    };
+  </script>
+
   <!-- image_cropper_for_web dependencies -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>

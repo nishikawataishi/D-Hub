@@ -1,6 +1,9 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:js' as js;
 import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../services/auth_notifier.dart';
@@ -83,6 +86,9 @@ class _LoginScreenState extends State<LoginScreen> {
     if (result.isSuccess) {
       // Safari等にパスワード保存を促す
       TextInput.finishAutofillContext(shouldSave: true);
+      if (kIsWeb) {
+        js.context.callMethod('saveCredential', [email, password]);
+      }
       // 成功時、手動での画面遷移は行わない。
       // AuthNotifierの状態変更 → AuthGate (Consumer) が自動的に画面を切り替える。
       if (_isSignUpMode) {
