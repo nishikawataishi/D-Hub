@@ -209,22 +209,21 @@ class FirestoreService {
 
     scoutData['sentAt'] = FieldValue.serverTimestamp();
 
-    // トランザクションで重複チェック + 作成をアトミックに実行
-    await _db.runTransaction((transaction) async {
-      final existingScouts = await _db
-          .collection('scouts')
-          .where('targetUserId', isEqualTo: targetUserId)
-          .where('organizationId', isEqualTo: senderOrg.id)
-          .where('isRead', isEqualTo: false)
-          .get();
+    // 重複チェック（Firestore WebはトランザクションでコレクションQueryを実行できないため外で実行）
+    final existingScouts = await _db
+        .collection('scouts')
+        .where('targetUserId', isEqualTo: targetUserId)
+        .where('organizationId', isEqualTo: senderOrg.id)
+        .where('isRead', isEqualTo: false)
+        .get();
 
-      if (existingScouts.docs.isNotEmpty) {
-        throw Exception('すでにこの学生には未読のスカウトを送信済みです。');
-      }
+    if (existingScouts.docs.isNotEmpty) {
+      throw Exception('すでにこの学生には未読のスカウトを送信済みです。');
+    }
 
-      final newDocRef = _db.collection('scouts').doc();
-      transaction.set(newDocRef, scoutData);
-    });
+    // スカウトを作成
+    final newDocRef = _db.collection('scouts').doc();
+    await newDocRef.set(scoutData);
   }
 
   // ─── イベント（Events） ───
