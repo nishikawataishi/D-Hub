@@ -241,6 +241,28 @@ exports.verifyCode = onCall(async (request) => {
 });
 
 /**
+ * ユーザーのFirebase Authアカウントを削除する Cloud Function
+ * 管理者のみが実行可能
+ */
+exports.deleteAuthUser = onCall(async (request) => {
+    if (!request.auth) {
+        throw new HttpsError("unauthenticated", "ログインが必要です。");
+    }
+    if (!request.auth.token.admin) {
+        throw new HttpsError("permission-denied", "管理者権限が必要です。");
+    }
+
+    const { uid } = request.data;
+    if (!uid || typeof uid !== "string" || uid.trim().length === 0) {
+        throw new HttpsError("invalid-argument", "対象ユーザーのUIDが必要です。");
+    }
+
+    await getAuth().deleteUser(uid.trim());
+    logger.info(`Auth user deleted: uid=${uid} by admin=${request.auth.uid}`);
+    return { success: true };
+});
+
+/**
  * 管理者カスタムクレームを付与する Cloud Function
  * 既存の管理者のみが他ユーザーに管理者権限を付与できる
  */
