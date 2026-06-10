@@ -16,6 +16,7 @@ import 'student_detail_screen.dart';
 import 'event_edit_screen.dart';
 import 'event_applications_screen.dart';
 import 'components/verified_badge.dart';
+import 'password_change_screen.dart';
 
 /// 団体用ダッシュボード画面
 /// 学生検索・スカウト、団体プロフィール編集、イベント管理などを行う
@@ -94,6 +95,16 @@ class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
         backgroundColor: AppTheme.surface,
         elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.lock_outline, color: AppTheme.textSecondary),
+            tooltip: 'パスワード変更',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const PasswordChangeScreen(),
+              ),
+            ),
+          ),
           IconButton(
             onPressed: () {
               context.read<AuthNotifier>().signOut();

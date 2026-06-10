@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import '../services/auth_notifier.dart';
 import '../services/firestore_service.dart';
 import '../models/organization.dart';
@@ -632,6 +633,9 @@ class _UserManagementTabState extends State<_UserManagementTab> {
     if (confirmed != true) return;
     try {
       await _firestoreService.deleteStudentAccount(user.id);
+      await FirebaseFunctions.instance
+          .httpsCallable('deleteAuthUser')
+          .call({'uid': user.id});
       messenger.showSnackBar(
           SnackBar(content: Text('「${user.name}」を削除しました')));
     } catch (e) {
