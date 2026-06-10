@@ -251,9 +251,17 @@ class AuthNotifier extends ChangeNotifier {
 
       final uid = user.uid;
 
-      // Firestoreデータ削除（存在しないドキュメントの削除はエラーにならない）
-      await _firestore.collection('users').doc(uid).delete();
-      await _firestore.collection('organizations').doc(uid).delete();
+      // Firestoreデータ削除
+      // 存在しないドキュメントの削除はルール評価（resource.data参照）で
+      // permission-deniedになるため、存在確認してから削除する
+      final userDoc = await _firestore.collection('users').doc(uid).get();
+      if (userDoc.exists) {
+        await _firestore.collection('users').doc(uid).delete();
+      }
+      final orgDoc = await _firestore.collection('organizations').doc(uid).get();
+      if (orgDoc.exists) {
+        await _firestore.collection('organizations').doc(uid).delete();
+      }
 
       // Firebase Auth アカウント削除
       await user.delete();
