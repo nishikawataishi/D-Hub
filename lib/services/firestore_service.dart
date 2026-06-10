@@ -441,7 +441,7 @@ class FirestoreService {
     return _db
         .collection('users')
         // 必要に応じて 'isStudent' フラグやプロフィール入力完了フラグでフィルタリング
-        .where('name', isNotEqualTo: null)
+        .where('name', isNull: false)
         .snapshots()
         .map(
           (snapshot) => snapshot.docs

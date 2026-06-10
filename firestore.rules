@@ -62,8 +62,10 @@ service cloud.firestore {
                     (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) == false ||
                      request.resource.data.status == resource.data.status));
 
-      // 削除：管理者のみ
-      allow delete: if isAdmin();
+      // 削除：管理者または団体オーナー本人（退会処理用）
+      allow delete: if isAdmin() ||
+                    isOwner(resource.data.representativeId) ||
+                    isOwner(docId);
     }
 
     // ==========================================================
