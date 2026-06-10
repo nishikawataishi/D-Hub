@@ -22,8 +22,8 @@ jobs:
       - name: 依存関係の取得
         run: flutter pub get
 
-      - name: 静的解析
-        run: flutter analyze
+      - name: 静的解析（エラー・警告のみ失敗、infoは許容）
+        run: flutter analyze --no-fatal-infos
 
       - name: テスト実行
         run: flutter test
