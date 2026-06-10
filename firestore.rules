@@ -37,7 +37,14 @@ service cloud.firestore {
           ['isStudentVerified', 'verificationCode', 'codeExpiresAt', 'verifiedAt',
            'verificationAttempts', 'lastCodeSentAt', 'codeHashedValue']
         );
-      allow create: if isOwner(userId);
+      // createは本人のみ可能。ただし認証済み状態やサーバー管理フィールドを
+      // 持ったドキュメントは作成不可（delete→再createによる学生認証バイパス対策）
+      allow create: if isOwner(userId) &&
+        request.resource.data.get('isStudentVerified', false) == false &&
+        !request.resource.data.keys().hasAny(
+          ['verificationCode', 'codeExpiresAt', 'verifiedAt',
+           'verificationAttempts', 'lastCodeSentAt', 'codeHashedValue']
+        );
       allow delete: if isOwner(userId) || isAdmin();
     }
 
@@ -56,11 +63,13 @@ service cloud.firestore {
                     request.resource.data.status == 'pending' &&
                     request.resource.data.representativeId == request.auth.uid;
 
-      // 更新：管理者はステータス変更可能、オーナーはステータス以外を変更可能
+      // 更新：管理者はステータス変更可能、オーナーは審査関連フィールド以外を変更可能
+      // （statusを他フィールドと同時に更新しても自己承認できないよう hasAny で禁止）
       allow update: if isAdmin() ||
                     ((isOwner(resource.data.representativeId) || isOwner(docId)) &&
-                    (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) == false ||
-                     request.resource.data.status == resource.data.status));
+                    !request.resource.data.diff(resource.data).affectedKeys().hasAny(
+                      ['status', 'verifiedAt', 'representativeId']
+                    ));
 
       // 削除：管理者または団体オーナー本人（退会処理用）
       allow delete: if isAdmin() ||
@@ -115,8 +124,11 @@ service cloud.firestore {
       allow get: if isAuthenticated() &&
         (request.auth.uid == resource.data.targetUserId ||
          request.auth.uid == resource.data.organizationId);
-      // listクエリはwhere条件でtargetUserIdまたはorganizationIdが自分のUIDである必要がある
-      allow list: if isAuthenticated();
+      // listクエリは当事者（スカウト対象の学生 or 送信元団体）のみ。
+      // クライアントのクエリはwhere条件で自分のUIDを指定している必要がある
+      allow list: if isAdmin() || (isAuthenticated() &&
+        (request.auth.uid == resource.data.targetUserId ||
+         request.auth.uid == resource.data.organizationId));
 
       // 更新（既読フラグなど）は対象学生のみ、かつisReadとreadAtのみ更新可能
       allow update: if isAuthenticated()
