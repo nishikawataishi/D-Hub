@@ -335,8 +335,8 @@ class AuthNotifier extends ChangeNotifier {
       // 学生アカウントの初期化
       final doc = await _firestore.collection('users').doc(user.uid).get();
       if (!doc.exists) {
+        // emailはFirebase Auth側で管理（usersドキュメントは団体に公開されるため保存しない）
         await _firestore.collection('users').doc(user.uid).set({
-          'email': user.email,
           'isStudentVerified': false,
           'createdAt': FieldValue.serverTimestamp(),
         });

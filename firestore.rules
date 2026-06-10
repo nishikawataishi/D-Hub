@@ -32,10 +32,12 @@ service cloud.firestore {
       allow get: if isOwner(userId) || isVerifiedOrg() || isAdmin();
       allow list: if isVerifiedOrg() || isAdmin();
       // updateは本人のみ可能。ただしサーバー管理フィールドは変更不可
+      // （レート制限カウンタ・大学メール等の自己改ざん防止を含む）
       allow update: if isOwner(userId) &&
         !request.resource.data.diff(resource.data).affectedKeys().hasAny(
           ['isStudentVerified', 'verificationCode', 'codeExpiresAt', 'verifiedAt',
-           'verificationAttempts', 'lastCodeSentAt', 'codeHashedValue']
+           'verificationAttempts', 'lastCodeSentAt', 'codeHashedValue',
+           'codeSentCount', 'codeSentWindowStart', 'universityEmail', 'email']
         );
       // createは本人のみ可能。ただし認証済み状態やサーバー管理フィールドを
       // 持ったドキュメントは作成不可（delete→再createによる学生認証バイパス対策）
@@ -43,9 +45,18 @@ service cloud.firestore {
         request.resource.data.get('isStudentVerified', false) == false &&
         !request.resource.data.keys().hasAny(
           ['verificationCode', 'codeExpiresAt', 'verifiedAt',
-           'verificationAttempts', 'lastCodeSentAt', 'codeHashedValue']
+           'verificationAttempts', 'lastCodeSentAt', 'codeHashedValue',
+           'codeSentCount', 'codeSentWindowStart', 'universityEmail']
         );
       allow delete: if isOwner(userId) || isAdmin();
+
+      // ── privateサブコレクション（認証メタデータ・大学メール等） ──
+      // Cloud Function（Admin SDK）のみが読み書きする。クライアントからは
+      // 管理者の読み取り以外一切アクセス不可（団体への個人情報露出防止）
+      match /private/{docId} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
     }
 
     match /organizations/{docId} {
