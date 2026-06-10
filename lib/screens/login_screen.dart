@@ -129,7 +129,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final elapsed = DateTime.now().difference(_lastPasswordResetSent!);
       if (elapsed.inSeconds < 60) {
         final remaining = 60 - elapsed.inSeconds;
-        _showMessage('${remaining}秒後に再送信できます', isError: true);
+        _showMessage('$remaining秒後に再送信できます', isError: true);
         return;
       }
     }
