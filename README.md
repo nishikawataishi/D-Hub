@@ -2,7 +2,6 @@
 
 [![Flutter](https://img.shields.io/badge/Flutter-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev/)
 [![Firebase](https://img.shields.io/badge/Firebase-FFCA28?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
 学生と大学内のあらゆる組織（サークル、ゼミ、プロジェクト、イベントなど）をシームレスかつ安全につなぐ、学生限定のコミュニティプラットフォーム。
 
