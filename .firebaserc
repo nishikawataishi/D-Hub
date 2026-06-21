@@ -1,5 +1,18 @@
 {
   "projects": {
     "default": "d-scout-6d281"
-  }
+  },
+  "targets": {
+    "d-scout-6d281": {
+      "hosting": {
+        "app": [
+          "d-scout-6d281"
+        ],
+        "lp": [
+          "d-hub-lp"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

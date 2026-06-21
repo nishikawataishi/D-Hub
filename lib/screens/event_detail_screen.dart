@@ -333,12 +333,24 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
                     Icons.calendar_month,
                     color: AppTheme.primary,
                   ),
-                  label: const Text(
-                    'カレンダーに追加',
-                    style: TextStyle(
-                      color: AppTheme.primary,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  label: const Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'カレンダーに追加',
+                        style: TextStyle(
+                          color: AppTheme.primary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        'Googleカレンダーに追加',
+                        style: TextStyle(
+                          color: AppTheme.primary,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
                   ),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),

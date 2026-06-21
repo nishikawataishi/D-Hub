@@ -60,11 +60,14 @@ exports.sendVerificationCode = onCall(
 
     const uid = request.auth.uid;
     const userRef = db.collection("users").doc(uid);
+    // 認証メタデータ（大学メール・コード・レート制限）は団体に公開される
+    // usersドキュメントではなく、クライアントから読めないprivateサブコレクションに保存
+    const privateRef = userRef.collection("private").doc("verification");
 
     // レート制限チェック
-    const userDoc = await userRef.get();
-    if (userDoc.exists) {
-        const data = userDoc.data();
+    const privateDoc = await privateRef.get();
+    if (privateDoc.exists) {
+        const data = privateDoc.data();
         const lastSentAt = data.lastCodeSentAt?.toDate();
         const codeSentCount = data.codeSentCount || 0;
         const codeSentWindowStart = data.codeSentWindowStart?.toDate();
@@ -94,13 +97,13 @@ exports.sendVerificationCode = onCall(
     const expiresAt = new Date(now.getTime() + CODE_EXPIRY_MINUTES * 60 * 1000);
 
     // 現在のウィンドウ情報を計算
-    const existingData = userDoc.exists ? userDoc.data() : {};
+    const existingData = privateDoc.exists ? privateDoc.data() : {};
     const existingWindowStart = existingData.codeSentWindowStart?.toDate();
     const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
     const resetWindow = !existingWindowStart || existingWindowStart <= hourAgo;
 
-    // Firestoreにハッシュ化コード + メタデータを保存
-    await userRef.set({
+    // privateサブコレクションにハッシュ化コード + メタデータを保存
+    await privateRef.set({
         codeHashedValue: hashedCode,
         universityEmail: normalizedEmail,
         codeExpiresAt: Timestamp.fromDate(expiresAt),
@@ -110,8 +113,10 @@ exports.sendVerificationCode = onCall(
         codeSentWindowStart: resetWindow
             ? FieldValue.serverTimestamp()
             : existingData.codeSentWindowStart,
-        isStudentVerified: false,
     }, { merge: true });
+
+    // usersドキュメント側は認証フラグのみ管理
+    await userRef.set({ isStudentVerified: false }, { merge: true });
 
     // エミュレーター環境ではメール送信をスキップ
     if (process.env.FUNCTIONS_EMULATOR === "true") {
@@ -131,12 +136,12 @@ exports.sendVerificationCode = onCall(
     const mailOptions = {
         from: `"D.scout 運営" <${SMTP_USER.value()}>`,
         to: normalizedEmail,
-        subject: "【D.scout】学生認証コードのお知らせ",
-        text: `D.scout をご利用いただきありがとうございます。\n\n以下の6桁の認証コードをアプリに入力して、学生認証を完了してください。\n\n認証コード: ${code}\n\n※このコードの有効期限は${CODE_EXPIRY_MINUTES}分です。\n※心当たりがない場合は、このメールを破棄してください。`,
+        subject: "【D-Hub】学生認証コードのお知らせ",
+        text: `D-Hub をご利用いただきありがとうございます。\n\n以下の6桁の認証コードをアプリに入力して、学生認証を完了してください。\n\n認証コード: ${code}\n\n※このコードの有効期限は${CODE_EXPIRY_MINUTES}分です。\n※心当たりがない場合は、このメールを破棄してください。`,
         html: `
         <div style="font-family: sans-serif; color: #333;">
-            <h2>D.scout 学生認証</h2>
-            <p>D.scout をご利用いただきありがとうございます。</p>
+            <h2>D-Hub 学生認証</h2>
+            <p>D-Hub をご利用いただきありがとうございます。</p>
             <p>以下の6桁の認証コードをアプリに入力して、学生認証を完了してください。</p>
             <div style="padding: 16px; background-color: #f4f4f4; border-radius: 8px; font-size: 24px; font-weight: bold; letter-spacing: 4px; text-align: center;">
                 ${code}
@@ -175,6 +180,7 @@ exports.verifyCode = onCall(async (request) => {
 
     const uid = request.auth.uid;
     const userRef = db.collection("users").doc(uid);
+    const privateRef = userRef.collection("private").doc("verification");
 
     // トランザクションで試行回数チェック + 検証をアトミックに実行
     const result = await db.runTransaction(async (transaction) => {
@@ -182,8 +188,12 @@ exports.verifyCode = onCall(async (request) => {
         if (!userDoc.exists) {
             throw new HttpsError("not-found", "ユーザー情報が見つかりません。");
         }
+        const privateDoc = await transaction.get(privateRef);
+        if (!privateDoc.exists) {
+            throw new HttpsError("failed-precondition", "認証コードが送信されていません。");
+        }
 
-        const data = userDoc.data();
+        const data = privateDoc.data();
         const hashedCode = data.codeHashedValue;
         const expiresAt = data.codeExpiresAt?.toDate();
         const attempts = data.verificationAttempts || 0;
@@ -213,7 +223,7 @@ exports.verifyCode = onCall(async (request) => {
         const inputHashed = hashCode(code.trim());
         if (inputHashed !== hashedCode) {
             // 試行回数をインクリメント
-            transaction.update(userRef, {
+            transaction.update(privateRef, {
                 verificationAttempts: attempts + 1,
             });
             return {
@@ -222,10 +232,13 @@ exports.verifyCode = onCall(async (request) => {
             };
         }
 
-        // 認証成功: isStudentVerified = true に更新 + コード削除
+        // 認証成功: isStudentVerified = true に更新 + コード関連フィールド削除
+        // universityEmail は監査用にprivate側へ残す
         transaction.update(userRef, {
             isStudentVerified: true,
             verifiedAt: FieldValue.serverTimestamp(),
+        });
+        transaction.update(privateRef, {
             codeHashedValue: FieldValue.delete(),
             codeExpiresAt: FieldValue.delete(),
             verificationAttempts: FieldValue.delete(),
@@ -238,6 +251,28 @@ exports.verifyCode = onCall(async (request) => {
     });
 
     return result;
+});
+
+/**
+ * ユーザーのFirebase Authアカウントを削除する Cloud Function
+ * 管理者のみが実行可能
+ */
+exports.deleteAuthUser = onCall(async (request) => {
+    if (!request.auth) {
+        throw new HttpsError("unauthenticated", "ログインが必要です。");
+    }
+    if (!request.auth.token.admin) {
+        throw new HttpsError("permission-denied", "管理者権限が必要です。");
+    }
+
+    const { uid } = request.data;
+    if (!uid || typeof uid !== "string" || uid.trim().length === 0) {
+        throw new HttpsError("invalid-argument", "対象ユーザーのUIDが必要です。");
+    }
+
+    await getAuth().deleteUser(uid.trim());
+    logger.info(`Auth user deleted: uid=${uid} by admin=${request.auth.uid}`);
+    return { success: true };
 });
 
 /**

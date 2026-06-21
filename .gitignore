@@ -83,3 +83,8 @@ jdk-*/
 # Miscellaneous local files
 sp-*.png
 scripts/
+
+# Firestore emulator logs
+firestore-debug.log
+firebase-debug.log
+ui-debug.log

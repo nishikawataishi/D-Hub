@@ -22,18 +22,27 @@ class GroupDetailScreen extends StatefulWidget {
 class _GroupDetailScreenState extends State<GroupDetailScreen> {
   final _firestoreService = FirestoreService();
   bool _isScouted = false;
+  Organization? _fullOrg;
 
   @override
   void initState() {
     super.initState();
     _checkScoutStatus();
+    _loadFullOrg();
   }
+
+  Future<void> _loadFullOrg() async {
+    final org = await _firestoreService.getOrganization(widget.organization.id);
+    if (mounted && org != null) setState(() => _fullOrg = org);
+  }
+
+  Organization get _org => _fullOrg ?? widget.organization;
 
   Future<void> _checkScoutStatus() async {
     final userId = FirebaseAuth.instance.currentUser?.uid;
     if (userId == null) return;
     final result = await _firestoreService.hasScouted(
-      orgId: widget.organization.id,
+      orgId: _org.id,
       userId: userId,
     );
     if (mounted) setState(() => _isScouted = result);
@@ -44,7 +53,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: Text(widget.organization.name),
+        title: Text(_org.name),
         actions: [
           IconButton(
             icon: const Icon(Icons.share),
@@ -69,19 +78,19 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                 decoration: BoxDecoration(
                   color: AppTheme.primary.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
-                  image: widget.organization.logoUrl != null
+                  image: _org.logoUrl != null
                       ? DecorationImage(
                           image: CachedNetworkImageProvider(
-                            widget.organization.logoUrl!,
+                            _org.logoUrl!,
                           ),
                           fit: BoxFit.cover,
                         )
                       : null,
                 ),
-                child: widget.organization.logoUrl == null
+                child: _org.logoUrl == null
                     ? Center(
                         child: Text(
-                          widget.organization.logoEmoji,
+                          _org.logoEmoji,
                           style: const TextStyle(fontSize: 50),
                         ),
                       )
@@ -89,9 +98,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
               ),
             ),
             // 写真ギャラリー
-            if (widget.organization.photoUrls.isNotEmpty) ...[
+            if (_org.photoUrls.isNotEmpty) ...[
               const SizedBox(height: 16),
-              PhotoGallery(photoUrls: widget.organization.photoUrls),
+              PhotoGallery(photoUrls: _org.photoUrls),
             ],
             const SizedBox(height: 16),
             Center(
@@ -99,13 +108,13 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
-                    widget.organization.name,
+                    _org.name,
                     style: const TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  if (widget.organization.status == 'verified') ...[
+                  if (_org.status == 'verified') ...[
                     const SizedBox(width: 8),
                     const VerifiedBadge(size: 24),
                   ],
@@ -114,8 +123,8 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
             ),
             Center(
               child: Text(
-                widget.organization.categories.isNotEmpty
-                    ? widget.organization.categories.first.label
+                _org.categories.isNotEmpty
+                    ? _org.categories.first.label
                     : '',
                 style: const TextStyle(
                   color: AppTheme.primary,
@@ -127,9 +136,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _buildChip(widget.organization.categories.first.label, Icons.category),
+                _buildChip(_org.categories.first.label, Icons.category),
                 const SizedBox(width: 8),
-                _buildChip(widget.organization.campus.label, Icons.location_on),
+                _buildChip(_org.campus.label, Icons.location_on),
               ],
             ),
             const SizedBox(height: 32),
@@ -153,7 +162,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                 border: Border.all(color: AppTheme.border),
               ),
               child: Text(
-                widget.organization.description,
+                _org.description,
                 style: const TextStyle(
                   fontSize: 15,
                   color: AppTheme.textSecondary,
@@ -163,14 +172,14 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
             ),
 
             // Instagram リンク
-            if (widget.organization.instagramUrl.trim().isNotEmpty) ...[
+            if (_org.instagramUrl.trim().isNotEmpty) ...[
               const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
                   onPressed: () async {
                     final url = _buildInstagramUrl(
-                      widget.organization.instagramUrl.trim(),
+                      _org.instagramUrl.trim(),
                     );
                     final uri = Uri.parse(url);
                     if (await canLaunchUrl(uri)) {
@@ -196,14 +205,14 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
 
             // グループLINE（スカウト済みの場合のみ表示）
             if (_isScouted &&
-                widget.organization.groupLineUrl.trim().isNotEmpty) ...[
+                _org.groupLineUrl.trim().isNotEmpty) ...[
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   onPressed: () async {
                     final uri = Uri.parse(
-                      widget.organization.groupLineUrl.trim(),
+                      _org.groupLineUrl.trim(),
                     );
                     if (await canLaunchUrl(uri)) {
                       await launchUrl(
@@ -248,7 +257,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
             const SizedBox(height: 8),
             StreamBuilder<List<Event>>(
               stream: _firestoreService.getEventsByOrganization(
-                widget.organization.id,
+                _org.id,
               ),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
