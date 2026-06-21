@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "fix/**", "feat/**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # ── Flutter テスト・静的解析 ──
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.41.2"
+          cache: true
+
+      # firebase_options.dart は gitignore 対象のため Secret から復元
+      - name: firebase_options.dart を復元
+        env:
+          FIREBASE_OPTIONS_DART: ${{ secrets.FIREBASE_OPTIONS_DART }}
+        run: echo "$FIREBASE_OPTIONS_DART" | base64 -d > lib/firebase_options.dart
+
+      - name: 依存関係の取得
+        run: flutter pub get
+
+      - name: 静的解析（エラー・警告のみ失敗、infoは許容）
+        run: flutter analyze --no-fatal-infos
+
+      - name: テスト実行
+        run: flutter test
+
+  # ── Firestore ルールテスト（エミュレータ） ──
+  rules-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: firebase-tools インストール
+        run: npm install -g firebase-tools
+
+      - name: 依存関係の取得
+        working-directory: firestore-tests
+        run: npm install
+
+      - name: ルールテスト実行
+        working-directory: firestore-tests
+        run: firebase emulators:exec --only firestore --project demo-rules-test "node --test rules.test.mjs"
+
+  # ── Android APK ビルド ──
+  build-android:
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.41.2"
+          cache: true
+
+      # google-services.json / firebase_options.dart は gitignore 対象のため Secret から復元
+      - name: Firebase設定ファイルを復元
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+          FIREBASE_OPTIONS_DART: ${{ secrets.FIREBASE_OPTIONS_DART }}
+        run: |
+          echo "$GOOGLE_SERVICES_JSON" | base64 -d > android/app/google-services.json
+          echo "$FIREBASE_OPTIONS_DART" | base64 -d > lib/firebase_options.dart
+
+      - name: 依存関係の取得
+        run: flutter pub get
+
+      - name: APK ビルド（実機確認用）
+        run: flutter build apk --release
+
+      - name: APK をアップロード
+        uses: actions/upload-artifact@v4
+        with:
+          name: d-hub-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14

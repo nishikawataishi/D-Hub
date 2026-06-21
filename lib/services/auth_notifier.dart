@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../models/organization.dart';
 import 'auth_service.dart';
 
 /// 認証状態を表すEnum
@@ -251,9 +250,17 @@ class AuthNotifier extends ChangeNotifier {
 
       final uid = user.uid;
 
-      // Firestoreデータ削除（存在しないドキュメントの削除はエラーにならない）
-      await _firestore.collection('users').doc(uid).delete();
-      await _firestore.collection('organizations').doc(uid).delete();
+      // Firestoreデータ削除
+      // 存在しないドキュメントの削除はルール評価（resource.data参照）で
+      // permission-deniedになるため、存在確認してから削除する
+      final userDoc = await _firestore.collection('users').doc(uid).get();
+      if (userDoc.exists) {
+        await _firestore.collection('users').doc(uid).delete();
+      }
+      final orgDoc = await _firestore.collection('organizations').doc(uid).get();
+      if (orgDoc.exists) {
+        await _firestore.collection('organizations').doc(uid).delete();
+      }
 
       // Firebase Auth アカウント削除
       await user.delete();
@@ -327,8 +334,8 @@ class AuthNotifier extends ChangeNotifier {
       // 学生アカウントの初期化
       final doc = await _firestore.collection('users').doc(user.uid).get();
       if (!doc.exists) {
+        // emailはFirebase Auth側で管理（usersドキュメントは団体に公開されるため保存しない）
         await _firestore.collection('users').doc(user.uid).set({
-          'email': user.email,
           'isStudentVerified': false,
           'createdAt': FieldValue.serverTimestamp(),
         });
