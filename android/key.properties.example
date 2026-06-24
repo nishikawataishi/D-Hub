@@ -1,0 +1,14 @@
+# リリース署名の設定見本。
+# このファイルをコピーして android/key.properties を作成し、実際の値を記入してください。
+#   cp android/key.properties.example android/key.properties
+# key.properties と *.jks は .gitignore 済み（絶対にコミットしないこと）。
+
+# キーストア生成コマンド（android/ ディレクトリで1回だけ実行）:
+#   keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+
+storePassword=ここにキーストアのパスワード
+keyPassword=ここに鍵のパスワード
+keyAlias=upload
+# storeFile は android/app/build.gradle.kts から見た相対パス、または絶対パス。
+# 例: android/upload-keystore.jks に置いた場合 → ../upload-keystore.jks
+storeFile=../upload-keystore.jks
