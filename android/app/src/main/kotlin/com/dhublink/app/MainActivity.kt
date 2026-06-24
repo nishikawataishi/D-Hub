@@ -1,4 +1,4 @@
-package jp.ac.doshisha.d_scout
+package com.dhublink.app
 
 import io.flutter.embedding.android.FlutterActivity
 
