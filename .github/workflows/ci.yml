@@ -87,6 +87,21 @@ jobs:
           echo "$GOOGLE_SERVICES_JSON" | base64 -d > android/app/google-services.json
           echo "$FIREBASE_OPTIONS_DART" | base64 -d > lib/firebase_options.dart
 
+      # リリース署名(keystore/key.properties)も gitignore 対象のため Secret から復元
+      # Secret が無い場合（例: フォークからのPR）は復元せず、build.gradle.kts が debug 署名へフォールバック
+      - name: リリース署名ファイルを復元
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_PROPERTIES: ${{ secrets.ANDROID_KEY_PROPERTIES }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEY_PROPERTIES" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/upload-keystore.jks
+            echo "$ANDROID_KEY_PROPERTIES" | base64 -d > android/key.properties
+            echo "リリース署名を復元しました"
+          else
+            echo "署名Secretが無いため debug 署名にフォールバックします"
+          fi
+
       - name: 依存関係の取得
         run: flutter pub get
 
@@ -98,4 +113,14 @@ jobs:
         with:
           name: d-hub-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
+
+      - name: AAB ビルド（Play申請用）
+        run: flutter build appbundle --release
+
+      - name: AAB をアップロード
+        uses: actions/upload-artifact@v4
+        with:
+          name: d-hub-aab
+          path: build/app/outputs/bundle/release/app-release.aab
           retention-days: 14
