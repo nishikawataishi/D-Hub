@@ -124,3 +124,44 @@ jobs:
           name: d-hub-aab
           path: build/app/outputs/bundle/release/app-release.aab
           retention-days: 14
+
+  # ── iOS ビルド（署名なし・App Store申請の前段検証） ──
+  # public リポジトリのため macOS ランナーは無料。Apple Developer 登録前でも
+  # 「CocoaPods 解決とコンパイルが通るか」だけを先に確認する目的。
+  build-ios:
+    needs: [test]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.41.2"
+          cache: true
+
+      # firebase_options.dart は gitignore 対象のため Secret から復元
+      - name: firebase_options.dart を復元
+        env:
+          FIREBASE_OPTIONS_DART: ${{ secrets.FIREBASE_OPTIONS_DART }}
+        run: echo "$FIREBASE_OPTIONS_DART" | base64 -d > lib/firebase_options.dart
+
+      - name: 依存関係の取得
+        run: flutter pub get
+
+      # ios/Podfile は未コミットのため flutter が自動生成する。
+      # Firebase系プラグインが iOS 15.0 以上を要求するため、
+      # project.pbxproj の IPHONEOS_DEPLOYMENT_TARGET も 15.0 に揃えてある。
+      - name: iOS ビルド（署名なし）
+        run: flutter build ios --release --no-codesign
+
+      - name: 生成された Podfile / Podfile.lock を保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-podfiles
+          path: |
+            ios/Podfile
+            ios/Podfile.lock
+          retention-days: 14
+          if-no-files-found: warn
