@@ -8,7 +8,7 @@
 PRODUCT_NAME = d_scout
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = jp.ac.doshisha.dScout
+PRODUCT_BUNDLE_IDENTIFIER = com.dhublink.app
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 jp.ac.doshisha. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 D-Hub. All rights reserved.
