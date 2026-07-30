@@ -97,7 +97,9 @@ final List<Scout> mockScouts = [
     organizationName: mockOrganizations[0].name,
     organizationEmoji: mockOrganizations[0].logoEmoji,
     organizationCategory: mockOrganizations[0].categories.first.name,
-    message: 'スポーツが好きなあなたにぜひ！一度見学に来ませんか？🏀',
+    // 0: 興味タグに共感
+    templateId: 0,
+    templateArg: 'スポーツ',
     sentAt: DateTime.now().subtract(const Duration(hours: 1)),
     isRead: false,
   ),
@@ -108,7 +110,9 @@ final List<Scout> mockScouts = [
     organizationName: mockOrganizations[2].name,
     organizationEmoji: mockOrganizations[2].logoEmoji,
     organizationCategory: mockOrganizations[2].categories.first.name,
-    message: '商学部で国際経済に興味があるあなたへ。ゼミ説明会を開催します！',
+    // 3: 学年を歓迎
+    templateId: 3,
+    templateArg: '2',
     sentAt: DateTime.now().subtract(const Duration(hours: 5)),
     isRead: false,
   ),
@@ -119,7 +123,10 @@ final List<Scout> mockScouts = [
     organizationName: mockOrganizations[3].name,
     organizationEmoji: mockOrganizations[3].logoEmoji,
     organizationCategory: mockOrganizations[3].categories.first.name,
-    message: 'ダンス未経験でも大歓迎！新歓公演の観覧に来てください💃',
+    // 1: イベントに招待
+    templateId: 1,
+    templateArg: '新歓公演',
+    templateEventId: 'e1',
     sentAt: DateTime.now().subtract(const Duration(days: 1)),
     isRead: true,
   ),
@@ -130,7 +137,8 @@ final List<Scout> mockScouts = [
     organizationName: mockOrganizations[5].name,
     organizationEmoji: mockOrganizations[5].logoEmoji,
     organizationCategory: mockOrganizations[5].categories.first.name,
-    message: '歌うことが好きなら、アカペラの世界をのぞいてみませんか？🎵',
+    // 4: 見学のお誘い（埋め込む値なし）
+    templateId: 4,
     sentAt: DateTime.now().subtract(const Duration(days: 2)),
     isRead: true,
   ),

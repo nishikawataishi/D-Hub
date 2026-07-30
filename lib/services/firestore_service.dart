@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../data/mock_data.dart';
 import '../models/scout.dart';
+import '../models/scout_template.dart';
 import '../models/event_application.dart';
 
 /// Firestoreのデータ操作を行うサービス
@@ -172,16 +173,26 @@ class FirestoreService {
     });
   }
 
-  /// スカウトを送信する（トランザクションで重複チェック + 作成をアトミックに実行）
+  /// スカウトを送信する
+  ///
+  /// 本文は自由記述できず、[template] で選んだ定型文に限られる。
+  /// [templateArg] は定型文に埋め込む値で、対象学生が実際に登録している値
+  /// （タグ・キャンパス・学年）または自団体のイベント名でなければ
+  /// Firestoreルール側で拒否される。
   Future<void> sendScout({
     required String targetUserId,
     required Organization senderOrg,
-    required String message,
+    required ScoutTemplate template,
+    String? templateArg,
+    String? templateEventId,
   }) async {
-    // メッセージ長バリデーション（Firestoreルールと一致）
-    final trimmedMessage = message.trim();
-    if (trimmedMessage.isEmpty || trimmedMessage.length > 500) {
-      throw Exception('メッセージは1〜500文字で入力してください。');
+    // ルールと同じ条件をクライアント側でも検証し、分かりやすいエラーを返す
+    if (template.needsArg && (templateArg == null || templateArg.isEmpty)) {
+      throw Exception('この定型文には埋め込む値の選択が必要です。');
+    }
+    if (template.slot == ScoutSlot.event &&
+        (templateEventId == null || templateEventId.isEmpty)) {
+      throw Exception('招待するイベントを選択してください。');
     }
 
     // 学生の情報を取得してアイコンURLを保持
@@ -197,7 +208,9 @@ class FirestoreService {
       organizationCategory: senderOrg.categories.isNotEmpty
           ? senderOrg.categories.first.label
           : OrgCategory.all.label,
-      message: trimmedMessage,
+      templateId: template.id,
+      templateArg: template.needsArg ? templateArg : null,
+      templateEventId: templateEventId,
       isRead: false,
       sentAt: now,
       organizationInstagramUrl: senderOrg.instagramUrl,
@@ -255,6 +268,19 @@ class FirestoreService {
               .map((doc) => Event.fromFirestore(doc.data(), doc.id))
               .toList(),
         );
+  }
+
+  /// 特定団体の開催予定イベントを一度だけ取得（スカウトの招待先選択用）
+  Future<List<Event>> fetchUpcomingEventsByOrganization(String orgId) async {
+    final snapshot = await _db
+        .collection('events')
+        .where('organizationId', isEqualTo: orgId)
+        .where('startAt', isGreaterThan: Timestamp.now())
+        .orderBy('startAt')
+        .get();
+    return snapshot.docs
+        .map((doc) => Event.fromFirestore(doc.data(), doc.id))
+        .toList();
   }
 
   /// イベントを作成
@@ -532,7 +558,8 @@ class FirestoreService {
         'organizationName': 'D-spirits',
         'organizationEmoji': '🏀',
         'organizationCategory': 'スポーツ',
-        'message': 'Firestoreからのテストスカウトです！動作確認おめでとうございます！🎉',
+        // 定型文「見学のお誘い」。埋め込む値を持たないので単体で成立する
+        'templateId': ScoutTemplate.generic.id,
         'sentAt': FieldValue.serverTimestamp(),
         'isRead': false,
       });
