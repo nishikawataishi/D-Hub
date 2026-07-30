@@ -149,11 +149,22 @@ jobs:
       - name: 依存関係の取得
         run: flutter pub get
 
-      # ios/Podfile は未コミットのため flutter が自動生成する。
       # Firebase系プラグインが iOS 15.0 以上を要求するため、
       # project.pbxproj の IPHONEOS_DEPLOYMENT_TARGET も 15.0 に揃えてある。
+      #
+      # ビルド番号(CFBundleVersion)には github.run_number を使う。
+      # App Store Connect は同じビルド番号の再アップロードを拒否するため、
+      # 単調増加する値を自動で割り当てて番号の付け忘れ・重複を防ぐ。
+      # バージョン名(CFBundleShortVersionString)は pubspec.yaml の version から取る。
       - name: iOS ビルド（署名なし）
-        run: flutter build ios --release --no-codesign
+        run: flutter build ios --release --no-codesign --build-number=${{ github.run_number }}
+
+      - name: ビルド情報をサマリへ出力
+        if: always()
+        run: |
+          echo "### iOS ビルド情報" >> "$GITHUB_STEP_SUMMARY"
+          echo "- バージョン名: $(grep '^version:' pubspec.yaml | sed 's/version: *//' | cut -d+ -f1)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- ビルド番号: ${{ github.run_number }}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: 生成された Podfile / Podfile.lock を保存
         if: always()
