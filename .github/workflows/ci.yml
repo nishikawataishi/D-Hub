@@ -52,9 +52,13 @@ jobs:
       - name: firebase-tools インストール
         run: npm install -g firebase-tools
 
-      - name: 依存関係の取得
+      # npm install ではなく npm ci を使う。
+      # npm install は毎回レジストリから解決し直すため、侵害版が公開されている
+      # 数時間の窓に当たると引き込んでしまう。npm ci は package-lock.json の
+      # 内容そのままを入れるので、ロックファイルを更新しない限り中身が変わらない。
+      - name: 依存関係の取得（ロックファイル厳守）
         working-directory: firestore-tests
-        run: npm install
+        run: npm ci
 
       - name: ルールテスト実行
         working-directory: firestore-tests
