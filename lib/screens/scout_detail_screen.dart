@@ -136,7 +136,7 @@ class _ScoutDetailScreenState extends State<ScoutDetailScreen> {
   Widget build(BuildContext context) {
     final orgName = widget.scout.organizationName;
     final orgEmoji = widget.scout.organizationEmoji;
-    final message = widget.scout.message;
+    final message = widget.scout.body;
     final sentAt = widget.scout.sentAt;
 
     final timeString =

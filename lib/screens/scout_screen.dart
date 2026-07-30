@@ -153,7 +153,7 @@ class _ScoutTileFromMap extends StatelessWidget {
       orgLogoUrl: scout.organizationLogoUrl,
       orgName: scout.organizationName,
       category: scout.organizationCategory,
-      message: scout.message,
+      message: scout.body,
       relativeTime: relativeTime,
       onTap: onTap,
     );

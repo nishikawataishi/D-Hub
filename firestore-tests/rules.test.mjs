@@ -11,6 +11,9 @@
  *   3. scouts コレクションの全件ダンプ
  *   4. レート制限カウンタ等の自己改ざん
  *   5. private サブコレクションへのクライアントアクセス
+ *
+ * 2026-07-31に追加した定型文スカウトの検証も含む:
+ *   6. スカウト本文の自由記述が保存できないこと
  */
 
 import { test, before, after, beforeEach } from "node:test";
@@ -62,20 +65,29 @@ beforeEach(async () => {
     });
     await setDoc(doc(db, "users", STUDENT), {
       name: "学生A", isStudentVerified: true,
+      interests: ["スポーツ", "音楽"], mainCampus: "imadegawa", grade: 2,
     });
     await setDoc(doc(db, "users", OTHER_STUDENT), {
       name: "学生B", isStudentVerified: true,
+      interests: ["ボランティア"], mainCampus: "kyotanabe", grade: 4,
     });
     await setDoc(doc(db, "users", STUDENT, "private", "verification"), {
       universityEmail: "a@mail.doshisha.ac.jp", codeSentCount: 3,
     });
+    // 定型文スカウトの埋め込み先として使うイベント
+    await setDoc(doc(db, "events", "event_of_verified"), {
+      organizationId: ORG_VERIFIED, title: "新歓ライブ",
+    });
+    await setDoc(doc(db, "events", "event_of_pending"), {
+      organizationId: ORG_PENDING, title: "他団体のイベント",
+    });
     await setDoc(doc(db, "scouts", "scout_to_A"), {
       targetUserId: STUDENT, organizationId: ORG_VERIFIED,
-      message: "こんにちは", isRead: false,
+      templateId: 4, isRead: false,
     });
     await setDoc(doc(db, "scouts", "scout_to_B"), {
       targetUserId: OTHER_STUDENT, organizationId: ORG_VERIFIED,
-      message: "こんにちは", isRead: false,
+      templateId: 4, isRead: false,
     });
   });
 });
@@ -232,20 +244,104 @@ test("scouts: 対象学生は既読フラグのみ更新できる", async () => 
   }));
 });
 
-test("scouts: 承認済み団体のみ作成できる（1〜500文字）", async () => {
-  await assertSucceeds(setDoc(doc(as(ORG_VERIFIED), "scouts", "new_scout"), {
+// ==========================================================
+// 3-b. 定型文スカウト（自由記述の禁止）
+// ==========================================================
+
+test("scouts create: 自由記述は保存できない", async () => {
+  // 旧形式の message フィールドは受け付けない
+  await assertFails(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_free1"), {
     targetUserId: STUDENT, organizationId: ORG_VERIFIED,
-    message: "スカウトです", isRead: false,
+    message: "自由に書いたメッセージ", isRead: false,
+  }));
+  // 定型文に message を併記して忍ばせることもできない
+  await assertFails(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_free2"), {
+    targetUserId: STUDENT, organizationId: ORG_VERIFIED,
+    templateId: 4, message: "こっそり本文", isRead: false,
+  }));
+  // 未知のフィールドに文章を入れることもできない
+  await assertFails(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_free3"), {
+    targetUserId: STUDENT, organizationId: ORG_VERIFIED,
+    templateId: 4, note: "任意テキスト", isRead: false,
+  }));
+});
+
+test("scouts create: 汎用定型文は承認済み団体のみ送れる", async () => {
+  await assertSucceeds(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_generic"), {
+    targetUserId: STUDENT, organizationId: ORG_VERIFIED,
+    templateId: 4, isRead: false,
   }));
   // 審査中団体は不可
-  await assertFails(setDoc(doc(as(ORG_PENDING), "scouts", "new_scout2"), {
+  await assertFails(setDoc(doc(as(ORG_PENDING), "scouts", "s_pending"), {
     targetUserId: STUDENT, organizationId: ORG_PENDING,
-    message: "スカウトです", isRead: false,
+    templateId: 4, isRead: false,
   }));
-  // 501文字は不可
-  await assertFails(setDoc(doc(as(ORG_VERIFIED), "scouts", "new_scout3"), {
+  // 定義されていない templateId は不可
+  await assertFails(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_bad_id"), {
     targetUserId: STUDENT, organizationId: ORG_VERIFIED,
-    message: "あ".repeat(501), isRead: false,
+    templateId: 99, isRead: false,
+  }));
+});
+
+test("scouts create: タグ定型文は学生が登録済みのタグに限る", async () => {
+  await assertSucceeds(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_tag_ok"), {
+    targetUserId: STUDENT, organizationId: ORG_VERIFIED,
+    templateId: 0, templateArg: "スポーツ", isRead: false,
+  }));
+  // 学生Aが登録していないタグ（学生Bのタグ）は不可
+  await assertFails(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_tag_ng1"), {
+    targetUserId: STUDENT, organizationId: ORG_VERIFIED,
+    templateId: 0, templateArg: "ボランティア", isRead: false,
+  }));
+  // 任意の文章を埋め込むこともできない
+  await assertFails(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_tag_ng2"), {
+    targetUserId: STUDENT, organizationId: ORG_VERIFIED,
+    templateId: 0, templateArg: "ここに好きな文章を書く", isRead: false,
+  }));
+});
+
+test("scouts create: イベント定型文は自団体の実在イベントに限る", async () => {
+  await assertSucceeds(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_ev_ok"), {
+    targetUserId: STUDENT, organizationId: ORG_VERIFIED,
+    templateId: 1, templateArg: "新歓ライブ",
+    templateEventId: "event_of_verified", isRead: false,
+  }));
+  // 他団体のイベントには招待できない
+  await assertFails(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_ev_other"), {
+    targetUserId: STUDENT, organizationId: ORG_VERIFIED,
+    templateId: 1, templateArg: "他団体のイベント",
+    templateEventId: "event_of_pending", isRead: false,
+  }));
+  // イベント名だけを別の文字列に差し替える＝自由記述の抜け道も塞ぐ
+  await assertFails(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_ev_fake"), {
+    targetUserId: STUDENT, organizationId: ORG_VERIFIED,
+    templateId: 1, templateArg: "イベント名に見せかけた自由記述",
+    templateEventId: "event_of_verified", isRead: false,
+  }));
+  // 存在しないイベントも不可
+  await assertFails(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_ev_missing"), {
+    targetUserId: STUDENT, organizationId: ORG_VERIFIED,
+    templateId: 1, templateArg: "架空のイベント",
+    templateEventId: "no_such_event", isRead: false,
+  }));
+});
+
+test("scouts create: キャンパス・学年は対象学生の登録値と一致が必要", async () => {
+  await assertSucceeds(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_campus_ok"), {
+    targetUserId: STUDENT, organizationId: ORG_VERIFIED,
+    templateId: 2, templateArg: "imadegawa", isRead: false,
+  }));
+  await assertFails(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_campus_ng"), {
+    targetUserId: STUDENT, organizationId: ORG_VERIFIED,
+    templateId: 2, templateArg: "kyotanabe", isRead: false,
+  }));
+  await assertSucceeds(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_grade_ok"), {
+    targetUserId: STUDENT, organizationId: ORG_VERIFIED,
+    templateId: 3, templateArg: "2", isRead: false,
+  }));
+  await assertFails(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_grade_ng"), {
+    targetUserId: STUDENT, organizationId: ORG_VERIFIED,
+    templateId: 3, templateArg: "4", isRead: false,
   }));
 });
 
