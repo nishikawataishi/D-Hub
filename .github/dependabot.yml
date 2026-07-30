@@ -1,0 +1,49 @@
+version: 2
+
+# npm のサプライチェーン攻撃対策として cooldown（公開直後の更新を待つ期間）を設ける。
+# 2025-09 の chalk/debug 侵害も 2026-03 の axios 侵害も、侵害版が公開されていたのは
+# 数時間〜1日程度で、その後すぐ削除・修正版が出ている。
+# 「公開直後には飛びつかない」だけで、この種の攻撃はほぼ回避できる。
+#
+# 注意: cooldown が効くのは version updates（このファイルによる定期更新PR）のみ。
+# セキュリティアップデートには適用されない。
+updates:
+  # ── Cloud Functions（本番にデプロイされる） ──
+  - package-ecosystem: "npm"
+    directory: "/functions"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 14
+      semver-patch-days: 7
+    labels:
+      - "dependencies"
+
+  # ── Firestore ルールテスト（CIのみで動作） ──
+  - package-ecosystem: "npm"
+    directory: "/firestore-tests"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 14
+      semver-patch-days: 7
+    labels:
+      - "dependencies"
+
+  # ── GitHub Actions 自体のバージョン ──
+  # actions/checkout などが侵害された場合、CIのSecretが盗まれうるため対象に含める。
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+    labels:
+      - "dependencies"

@@ -67,7 +67,9 @@ emulator_log.txt
 # Node.js
 node_modules/
 functions/node_modules/
-package-lock.json
+# package-lock.json は「コミットする」。バージョンを固定することが
+# npmサプライチェーン攻撃（侵害版は数時間で削除されることが多い）への
+# 最も基本的な防御になるため、ignore しない。
 
 # Firebase cache
 .firebase/
