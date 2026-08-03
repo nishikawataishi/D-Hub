@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../models/account_role.dart';
 import '../models/organization.dart';
 import '../models/event.dart';
 import '../theme/app_theme.dart';
 import '../screens/components/verified_badge.dart';
+import 'components/moderation_menu.dart';
 import 'components/photo_gallery.dart';
 import '../services/firestore_service.dart';
 import 'event_detail_screen.dart';
@@ -38,6 +40,19 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
 
   Organization get _org => _fullOrg ?? widget.organization;
 
+  /// 通報時に運営へ共有する団体プロフィールの内容（利用規約 第7条2）
+  Map<String, dynamic> _orgSnapshot() {
+    return {
+      'name': _org.name,
+      'description': _org.description,
+      'categories': _org.categories.map((c) => c.label).toList(),
+      'campus': _org.campus.label,
+      'instagramUrl': _org.instagramUrl,
+      if (_org.logoUrl != null) 'logoUrl': _org.logoUrl,
+      'photoUrls': _org.photoUrls,
+    };
+  }
+
   Future<void> _checkScoutStatus() async {
     final userId = FirebaseAuth.instance.currentUser?.uid;
     if (userId == null) return;
@@ -62,6 +77,14 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                 context,
               ).showSnackBar(const SnackBar(content: Text('シェア機能は準備中です')));
             },
+          ),
+          ModerationMenu(
+            viewerRole: AccountRole.student,
+            targetId: _org.id,
+            targetName: _org.name,
+            contentSnapshot: _orgSnapshot(),
+            // ブロックした団体は一覧から消えるため、詳細も開いたままにしない
+            onBlocked: () => Navigator.pop(context),
           ),
         ],
       ),
