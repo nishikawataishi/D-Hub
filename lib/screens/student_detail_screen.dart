@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_theme.dart';
+import '../models/account_role.dart';
 import '../models/user_profile.dart';
 import '../services/firestore_service.dart';
+import 'components/moderation_menu.dart';
 import 'components/photo_gallery.dart';
 import 'components/scout_compose_dialog.dart';
 
@@ -17,6 +19,20 @@ class StudentDetailScreen extends StatefulWidget {
 }
 
 class _StudentDetailScreenState extends State<StudentDetailScreen> {
+  /// 通報時に運営へ共有するプロフィールの内容（利用規約 第7条2）
+  Map<String, dynamic> _profileSnapshot() {
+    final student = widget.student;
+    return {
+      'name': student.name,
+      'faculty': student.faculty,
+      'grade': student.grade,
+      'mainCampus': student.mainCampus.label,
+      'interests': student.interests,
+      if (student.iconUrl != null) 'iconUrl': student.iconUrl,
+      'photoUrls': student.photoUrls,
+    };
+  }
+
   Future<void> _showScoutDialog() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -70,6 +86,16 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
         backgroundColor: AppTheme.surface,
         elevation: 0,
         iconTheme: const IconThemeData(color: AppTheme.textPrimary),
+        actions: [
+          ModerationMenu(
+            viewerRole: AccountRole.organization,
+            targetId: widget.student.id,
+            targetName: widget.student.name,
+            contentSnapshot: _profileSnapshot(),
+            // ブロックした学生は一覧から消えるため、詳細も開いたままにしない
+            onBlocked: () => Navigator.pop(context),
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),

@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
+import '../models/account_role.dart';
 import '../models/organization.dart';
 import '../models/campus.dart';
 import 'group_detail_screen.dart';
@@ -23,11 +26,31 @@ class _HomeScreenState extends State<HomeScreen> {
   OrgCategory _selectedCategory = OrgCategory.all;
   String _searchQuery = '';
 
+  /// ブロックした団体のID。一覧から除外するために保持する（利用規約 第8条）
+  Set<String> _blockedOrgIds = const {};
+  StreamSubscription<Set<String>>? _blockedSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _blockedSubscription = _firestoreService
+        .getBlockedIds(AccountRole.student)
+        .listen(
+          (ids) {
+            if (mounted) setState(() => _blockedOrgIds = ids);
+          },
+          // ログアウト直後は未認証のまま届くことがある。握りつぶして落とさない
+          onError: (Object e) => debugPrint('HomeScreen blocks stream: $e'),
+        );
+  }
+
   /// 検索とフィルタリング（リスト内でクライアント側フィルタ）
   List<Organization> _filterOrganizations(List<Organization> orgs) {
     return orgs.where((org) {
       // 一般ユーザーには認証済み団体のみ表示
       final isVerified = org.status == 'verified';
+      // ブロックした団体は一覧に出さない
+      final isBlocked = _blockedOrgIds.contains(org.id);
       final matchesCategory =
           _selectedCategory == OrgCategory.all ||
           org.categories.contains(_selectedCategory);
@@ -35,12 +58,13 @@ class _HomeScreenState extends State<HomeScreen> {
           _searchQuery.isEmpty ||
           org.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
           org.description.toLowerCase().contains(_searchQuery.toLowerCase());
-      return isVerified && matchesCategory && matchesSearch;
+      return isVerified && !isBlocked && matchesCategory && matchesSearch;
     }).toList();
   }
 
   @override
   void dispose() {
+    _blockedSubscription?.cancel();
     _searchController.dispose();
     super.dispose();
   }

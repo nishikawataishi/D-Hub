@@ -1,12 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../services/auth_notifier.dart';
 import '../services/firestore_service.dart';
+import '../models/account_role.dart';
 import '../models/campus.dart';
 import '../models/user_profile.dart';
 import '../models/tag.dart';
 import '../theme/app_theme.dart';
+import 'blocked_accounts_screen.dart';
 import 'profile_edit_screen.dart';
 import 'password_change_screen.dart';
 import 'terms_screen.dart';
@@ -31,16 +35,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   /// タグマスタの一覧（ストリームから取得）
   List<Tag> _masterTags = [];
+  StreamSubscription<List<Tag>>? _tagsSubscription;
 
   @override
   void initState() {
     super.initState();
-    // タグマスタをストリームで購読
-    _firestoreService.getTags().listen((tags) {
-      if (mounted) {
-        setState(() => _masterTags = tags);
-      }
-    });
+    // タグマスタをストリームで購読。購読を保持して dispose で解除しないと、
+    // ログアウト後も listen が残り permission-denied が発生し続ける
+    _tagsSubscription = _firestoreService.getTags().listen(
+      (tags) {
+        if (mounted) {
+          setState(() => _masterTags = tags);
+        }
+      },
+      onError: (Object e) => debugPrint('ProfileScreen tags stream error: $e'),
+    );
   }
 
   /// タグの追加（マスタにも自動登録）
@@ -72,6 +81,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   void dispose() {
+    _tagsSubscription?.cancel();
     _tagController.dispose();
     super.dispose();
   }
@@ -503,6 +513,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
             icon: Icons.notifications_none_outlined,
             title: '通知設定',
             onTap: () {},
+          ),
+          const Divider(height: 1, indent: 56),
+          _SettingsTile(
+            icon: Icons.block,
+            title: 'ブロックした団体',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const BlockedAccountsScreen(
+                    role: AccountRole.student,
+                  ),
+                ),
+              );
+            },
           ),
           const Divider(height: 1, indent: 56),
           _SettingsTile(
