@@ -5,6 +5,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import '../services/auth_notifier.dart';
 import '../services/firestore_service.dart';
 import '../models/organization.dart';
+import '../models/report.dart';
 import '../models/user_profile.dart';
 import '../theme/app_theme.dart';
 import 'password_change_screen.dart';
@@ -28,6 +29,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         title: Text(switch (_currentTab) {
           0 => '団体管理',
           1 => 'ユーザー管理',
+          2 => '通報',
           _ => 'お問い合わせ',
         }),
         actions: [
@@ -50,12 +52,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       body: switch (_currentTab) {
         0 => const _OrganizationManagementTab(),
         1 => const _UserManagementTab(),
+        2 => const _ReportManagementTab(),
         _ => const _ContactManagementTab(),
       },
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentTab,
         onTap: (index) => setState(() => _currentTab = index),
         selectedItemColor: AppTheme.primary,
+        // 4項目になるとデフォルトが shifting になり未選択のラベルが消えるため固定する
+        type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.business),
@@ -64,6 +69,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.people),
             label: 'ユーザー管理',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.flag_outlined),
+            label: '通報',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.mail_outline),
@@ -933,6 +942,268 @@ class _InfoRow extends StatelessWidget {
 // ============================================================
 // お問い合わせ管理タブ
 // ============================================================
+
+// ============================================================
+// 通報管理タブ
+// ============================================================
+// 利用規約 第7条3に基づき、運営が通報内容を確認して第9条の措置を判断する。
+// 対象アカウントへの警告・停止・削除は既存の団体管理／ユーザー管理タブで行う。
+
+class _ReportManagementTab extends StatefulWidget {
+  const _ReportManagementTab();
+
+  @override
+  State<_ReportManagementTab> createState() => _ReportManagementTabState();
+}
+
+class _ReportManagementTabState extends State<_ReportManagementTab> {
+  final FirestoreService _firestoreService = FirestoreService();
+  String _filter = 'open';
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              _FilterChip(
+                label: '未対応',
+                selected: _filter == 'open',
+                onTap: () => setState(() => _filter = 'open'),
+              ),
+              const SizedBox(width: 8),
+              _FilterChip(
+                label: '対応済み',
+                selected: _filter == 'closed',
+                onTap: () => setState(() => _filter = 'closed'),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: StreamBuilder<List<Report>>(
+            stream: _firestoreService.getReportsForAdmin(status: _filter),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return Center(child: Text('エラー: ${snapshot.error}'));
+              }
+              final reports = snapshot.data ?? const <Report>[];
+              if (reports.isEmpty) {
+                return Center(
+                  child: Text(
+                    _filter == 'open' ? '未対応の通報はありません' : '対応済みの通報はありません',
+                    style: const TextStyle(color: Colors.grey),
+                  ),
+                );
+              }
+              return ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: reports.length,
+                itemBuilder: (context, index) {
+                  final report = reports[index];
+                  return _ReportCard(
+                    report: report,
+                    onTap: () => _showReportDetail(context, report),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showReportDetail(BuildContext context, Report report) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${report.targetType.label}への通報'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _DetailRow(
+                  label: '通報日時',
+                  value: report.createdAt != null
+                      ? _formatDateTime(report.createdAt!)
+                      : '不明',
+                ),
+                _DetailRow(label: '理由', value: report.reason.label),
+                _DetailRow(
+                  label: '対象',
+                  value: '${report.targetName}（${report.targetId}）',
+                ),
+                _DetailRow(
+                  label: '通報者',
+                  value: '${report.reporterRole.id}：${report.reporterId}',
+                ),
+                if (report.detail.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  const Text(
+                    '通報者からの補足',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    width: double.maxFinite,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      report.detail,
+                      style: const TextStyle(fontSize: 14, height: 1.5),
+                    ),
+                  ),
+                ],
+                if (report.snapshot.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  const Text(
+                    '通報時点の対象の内容',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    width: double.maxFinite,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: report.snapshot.entries
+                          .map(
+                            (e) => Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: Text(
+                                '${e.key}: ${e.value}',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('閉じる'),
+          ),
+          if (report.status == 'open')
+            FilledButton(
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                Navigator.pop(context);
+                await _firestoreService.updateReportStatus(
+                  report.id,
+                  'closed',
+                );
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('対応済みにしました')),
+                );
+              },
+              child: const Text('対応済みにする'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDateTime(DateTime dt) {
+    return '${dt.year}/${dt.month.toString().padLeft(2, '0')}/'
+        '${dt.day.toString().padLeft(2, '0')} '
+        '${dt.hour.toString().padLeft(2, '0')}:'
+        '${dt.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+class _ReportCard extends StatelessWidget {
+  final Report report;
+  final VoidCallback onTap;
+
+  const _ReportCard({required this.report, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final createdAt = report.createdAt;
+    final dateStr = createdAt != null
+        ? '${createdAt.month}/${createdAt.day} '
+              '${createdAt.hour.toString().padLeft(2, '0')}:'
+              '${createdAt.minute.toString().padLeft(2, '0')}'
+        : '';
+
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 10),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade200),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 8,
+        ),
+        leading: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: AppTheme.error.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            report.targetType.label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppTheme.error,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        title: Text(
+          report.targetName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text(
+          dateStr.isNotEmpty
+              ? '${report.reason.label} ・ $dateStr'
+              : report.reason.label,
+          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+        ),
+        trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+        onTap: onTap,
+      ),
+    );
+  }
+}
 
 class _ContactManagementTab extends StatefulWidget {
   const _ContactManagementTab();

@@ -14,6 +14,11 @@
  *
  * 2026-07-31に追加した定型文スカウトの検証も含む:
  *   6. スカウト本文の自由記述が保存できないこと
+ *
+ * 2026-08-04に追加した通報・ブロックの検証も含む:
+ *   7. 通報は運営しか読めないこと（利用規約 第7条4）
+ *   8. ブロックしたことが相手から見えないこと（同 第8条3）
+ *   9. ブロックした団体からスカウトが届かないこと（同 第8条2）
  */
 
 import { test, before, after, beforeEach } from "node:test";
@@ -88,6 +93,13 @@ beforeEach(async () => {
     await setDoc(doc(db, "scouts", "scout_to_B"), {
       targetUserId: OTHER_STUDENT, organizationId: ORG_VERIFIED,
       templateId: 4, isRead: false,
+    });
+    // 読み取り権限を確かめるための既存の通報
+    await setDoc(doc(db, "reports", "seeded_report"), {
+      reporterId: STUDENT, reporterRole: "student",
+      targetType: "organization", targetId: ORG_VERIFIED,
+      targetName: "承認済み団体", reason: "inappropriate_content",
+      detail: "", snapshot: {}, status: "open", createdAt: new Date(),
     });
   });
 });
@@ -405,4 +417,192 @@ test("users: 審査中団体・学生・未認証は一覧を取得できない"
 
 test("users: 学生は他の学生のプロフィールを読めない", async () => {
   await assertFails(getDoc(doc(as(STUDENT), "users", OTHER_STUDENT)));
+});
+
+// ==========================================================
+// 7. 通報（利用規約 第7条）
+// ==========================================================
+
+/** 学生から団体への通報の雛形。overrides で一部を壊してテストする */
+const reportDoc = (overrides = {}) => ({
+  reporterId: STUDENT,
+  reporterRole: "student",
+  targetType: "organization",
+  targetId: ORG_VERIFIED,
+  targetName: "承認済み団体",
+  reason: "inappropriate_content",
+  detail: "",
+  snapshot: { name: "承認済み団体" },
+  status: "open",
+  createdAt: new Date(),
+  ...overrides,
+});
+
+test("reports create: 学生は団体を、団体は学生を通報できる", async () => {
+  await assertSucceeds(setDoc(doc(as(STUDENT), "reports", "r_s2o"), reportDoc()));
+  await assertSucceeds(setDoc(doc(as(ORG_VERIFIED), "reports", "r_o2s"), reportDoc({
+    reporterId: ORG_VERIFIED, reporterRole: "organization",
+    targetType: "user", targetId: STUDENT, targetName: "学生A",
+  })));
+});
+
+test("reports create: 未認証は通報できない", async () => {
+  await assertFails(setDoc(doc(asAnon(), "reports", "r_anon"), reportDoc()));
+});
+
+test("reports create: 自分自身は通報できない", async () => {
+  await assertFails(setDoc(doc(as(STUDENT), "reports", "r_self"), reportDoc({
+    targetType: "user", targetId: STUDENT, targetName: "学生A",
+  })));
+});
+
+test("reports create: 通報者IDの詐称は拒否（他人になりすました通報を防ぐ）", async () => {
+  await assertFails(setDoc(doc(as(STUDENT), "reports", "r_spoof"), reportDoc({
+    reporterId: OTHER_STUDENT,
+  })));
+});
+
+test("reports create: 未定義の理由・種別は拒否", async () => {
+  await assertFails(setDoc(doc(as(STUDENT), "reports", "r_reason"), reportDoc({
+    reason: "適当な理由",
+  })));
+  await assertFails(setDoc(doc(as(STUDENT), "reports", "r_type"), reportDoc({
+    targetType: "event",
+  })));
+  await assertFails(setDoc(doc(as(STUDENT), "reports", "r_role"), reportDoc({
+    reporterRole: "admin",
+  })));
+});
+
+test("reports create: 対応済みでの作成・余計なフィールド・長すぎる補足は拒否", async () => {
+  // 自分で status を closed にして運営の確認を飛ばすことはできない
+  await assertFails(setDoc(doc(as(STUDENT), "reports", "r_closed"), reportDoc({
+    status: "closed",
+  })));
+  await assertFails(setDoc(doc(as(STUDENT), "reports", "r_extra"), reportDoc({
+    adminNote: "運営メモに見せかけた書き込み",
+  })));
+  await assertFails(setDoc(doc(as(STUDENT), "reports", "r_long"), reportDoc({
+    detail: "あ".repeat(1001),
+  })));
+});
+
+test("reports read: 通報者本人も他人も読めない（運営のみ確認する）", async () => {
+  await assertFails(getDoc(doc(as(STUDENT), "reports", "seeded_report")));
+  await assertFails(getDocs(collection(as(STUDENT), "reports")));
+  // 通報された側から通報者を特定できないこと（第7条4）
+  await assertFails(getDoc(doc(as(ORG_VERIFIED), "reports", "seeded_report")));
+  await assertFails(getDocs(collection(as(ORG_VERIFIED), "reports")));
+});
+
+test("reports read/update: 管理者は閲覧と対応済み化ができる", async () => {
+  await assertSucceeds(getDoc(doc(asAdmin(), "reports", "seeded_report")));
+  await assertSucceeds(getDocs(collection(asAdmin(), "reports")));
+  await assertSucceeds(updateDoc(doc(asAdmin(), "reports", "seeded_report"), {
+    status: "closed", reviewedAt: new Date(),
+  }));
+});
+
+test("reports update: 通報者・対象者は書き換えられない", async () => {
+  await assertFails(updateDoc(doc(as(STUDENT), "reports", "seeded_report"), {
+    status: "closed",
+  }));
+  await assertFails(updateDoc(doc(as(ORG_VERIFIED), "reports", "seeded_report"), {
+    detail: "都合の悪い内容を消す",
+  }));
+  await assertFails(deleteDoc(doc(as(ORG_VERIFIED), "reports", "seeded_report")));
+});
+
+// ==========================================================
+// 8. ブロック（利用規約 第8条）
+// ==========================================================
+
+const blockData = { targetName: "相手の名前", createdAt: new Date() };
+
+test("blocks: 学生は自分のブロックを作成・取得・解除できる", async () => {
+  await assertSucceeds(setDoc(
+    doc(as(STUDENT), "users", STUDENT, "blocks", ORG_VERIFIED), blockData));
+  await assertSucceeds(getDocs(
+    collection(as(STUDENT), "users", STUDENT, "blocks")));
+  await assertSucceeds(deleteDoc(
+    doc(as(STUDENT), "users", STUDENT, "blocks", ORG_VERIFIED)));
+});
+
+test("blocks: ブロックされた側からは見えない（相手に通知されない）", async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "users", STUDENT, "blocks", ORG_VERIFIED),
+      blockData);
+  });
+  // 承認済み団体は users ドキュメント自体は読めるが、blocks は読めない
+  await assertFails(getDoc(
+    doc(as(ORG_VERIFIED), "users", STUDENT, "blocks", ORG_VERIFIED)));
+  await assertFails(getDocs(
+    collection(as(ORG_VERIFIED), "users", STUDENT, "blocks")));
+  // 他人のブロックを勝手に解除することもできない
+  await assertFails(deleteDoc(
+    doc(as(ORG_VERIFIED), "users", STUDENT, "blocks", ORG_VERIFIED)));
+});
+
+test("blocks: 他人のブロック一覧に書き込めない", async () => {
+  await assertFails(setDoc(
+    doc(as(OTHER_STUDENT), "users", STUDENT, "blocks", ORG_VERIFIED), blockData));
+  await assertFails(setDoc(
+    doc(as(STUDENT), "organizations", ORG_VERIFIED, "blocks", STUDENT), blockData));
+});
+
+test("blocks: 団体は自分のブロックを操作でき、学生からは見えない", async () => {
+  await assertSucceeds(setDoc(
+    doc(as(ORG_VERIFIED), "organizations", ORG_VERIFIED, "blocks", STUDENT),
+    blockData));
+  await assertSucceeds(getDocs(
+    collection(as(ORG_VERIFIED), "organizations", ORG_VERIFIED, "blocks")));
+  await assertFails(getDoc(
+    doc(as(STUDENT), "organizations", ORG_VERIFIED, "blocks", STUDENT)));
+  await assertSucceeds(deleteDoc(
+    doc(as(ORG_VERIFIED), "organizations", ORG_VERIFIED, "blocks", STUDENT)));
+});
+
+test("blocks: 管理者は通報対応のために閲覧できる", async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "users", STUDENT, "blocks", ORG_VERIFIED),
+      blockData);
+  });
+  await assertSucceeds(getDoc(
+    doc(asAdmin(), "users", STUDENT, "blocks", ORG_VERIFIED)));
+});
+
+// ==========================================================
+// 9. ブロックとスカウトの連動（利用規約 第8条2）
+// ==========================================================
+
+test("scouts create: ブロックした団体からはスカウトが届かない", async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "users", STUDENT, "blocks", ORG_VERIFIED),
+      blockData);
+  });
+  // 学生Aはこの団体をブロックしている
+  await assertFails(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_blocked"), {
+    targetUserId: STUDENT, organizationId: ORG_VERIFIED,
+    templateId: 4, isRead: false,
+  }));
+  // ブロックしていない学生Bには変わらず送れる
+  await assertSucceeds(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_not_blocked"), {
+    targetUserId: OTHER_STUDENT, organizationId: ORG_VERIFIED,
+    templateId: 4, isRead: false,
+  }));
+});
+
+test("scouts create: ブロックを解除すれば再び届く", async () => {
+  await assertSucceeds(setDoc(
+    doc(as(STUDENT), "users", STUDENT, "blocks", ORG_VERIFIED), blockData));
+  await assertFails(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_before"), {
+    targetUserId: STUDENT, organizationId: ORG_VERIFIED,
+    templateId: 4, isRead: false,
+  }));
+  await assertSucceeds(deleteDoc(
+    doc(as(STUDENT), "users", STUDENT, "blocks", ORG_VERIFIED)));
+  await assertSucceeds(setDoc(doc(as(ORG_VERIFIED), "scouts", "s_after"), {
+    targetUserId: STUDENT, organizationId: ORG_VERIFIED,
+    templateId: 4, isRead: false,
+  }));
 });

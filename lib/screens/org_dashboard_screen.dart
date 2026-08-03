@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../services/auth_notifier.dart';
 import '../services/firestore_service.dart';
+import '../models/account_role.dart';
 import '../models/user_profile.dart';
 import '../models/event.dart';
 import '../models/event_application.dart';
@@ -32,10 +35,29 @@ class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
   Organization? _currentOrg;
   bool _isOrgLoading = true;
 
+  /// ブロックした学生のID。学生検索の一覧から除外する（利用規約 第8条）
+  Set<String> _blockedStudentIds = const {};
+  StreamSubscription<Set<String>>? _blockedSubscription;
+
   @override
   void initState() {
     super.initState();
     _loadOrgStatus();
+    _blockedSubscription = FirestoreService()
+        .getBlockedIds(AccountRole.organization)
+        .listen(
+          (ids) {
+            if (mounted) setState(() => _blockedStudentIds = ids);
+          },
+          // ログアウト直後は未認証のまま届くことがある。握りつぶして落とさない
+          onError: (Object e) => debugPrint('OrgDashboard blocks stream: $e'),
+        );
+  }
+
+  @override
+  void dispose() {
+    _blockedSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadOrgStatus() async {
@@ -220,7 +242,10 @@ class _OrgDashboardScreenState extends State<OrgDashboardScreen> {
           );
         }
 
-        final students = snapshot.data ?? [];
+        // ブロックした学生は一覧に出さない
+        final students = (snapshot.data ?? const <UserProfile>[])
+            .where((s) => !_blockedStudentIds.contains(s.id))
+            .toList();
 
         if (students.isEmpty) {
           return const Center(

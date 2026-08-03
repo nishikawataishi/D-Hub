@@ -3,10 +3,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../../services/image_service.dart';
 import '../../services/firestore_service.dart';
 import '../../services/storage_service.dart';
+import '../../models/account_role.dart';
 import '../../models/organization.dart';
 import '../../models/campus.dart';
 import '../../theme/app_theme.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../blocked_accounts_screen.dart';
 import 'photo_gallery_editor.dart';
 
 class OrgProfileEditTab extends StatefulWidget {
@@ -242,6 +244,27 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
               ),
+            ),
+            const SizedBox(height: 24),
+            const Divider(),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.block, color: AppTheme.textSecondary),
+              title: const Text('ブロックした学生', style: TextStyle(fontSize: 15)),
+              trailing: const Icon(
+                Icons.chevron_right,
+                color: AppTheme.textSecondary,
+              ),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const BlockedAccountsScreen(
+                      role: AccountRole.organization,
+                    ),
+                  ),
+                );
+              },
             ),
           ],
         ),
