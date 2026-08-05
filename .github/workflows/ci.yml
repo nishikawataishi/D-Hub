@@ -144,11 +144,16 @@ jobs:
           flutter-version: "3.41.2"
           cache: true
 
-      # firebase_options.dart は gitignore 対象のため Secret から復元
-      - name: firebase_options.dart を復元
+      # firebase_options.dart / GoogleService-Info.plist は gitignore 対象のため Secret から復元。
+      # plist は Runner ターゲットの Copy Bundle Resources に登録済みなので、
+      # 復元しないと「ファイルが無い」でビルドが失敗する。
+      - name: Firebase設定ファイルを復元
         env:
           FIREBASE_OPTIONS_DART: ${{ secrets.FIREBASE_OPTIONS_DART }}
-        run: echo "$FIREBASE_OPTIONS_DART" | base64 -d > lib/firebase_options.dart
+          GOOGLESERVICE_INFO_PLIST: ${{ secrets.GOOGLESERVICE_INFO_PLIST }}
+        run: |
+          echo "$FIREBASE_OPTIONS_DART" | base64 -d > lib/firebase_options.dart
+          echo "$GOOGLESERVICE_INFO_PLIST" | base64 -d > ios/Runner/GoogleService-Info.plist
 
       - name: 依存関係の取得
         run: flutter pub get
