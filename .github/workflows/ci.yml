@@ -113,7 +113,7 @@ jobs:
         run: flutter build apk --release
 
       - name: APK をアップロード
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: d-hub-apk
           path: build/app/outputs/flutter-apk/app-release.apk
@@ -123,7 +123,7 @@ jobs:
         run: flutter build appbundle --release
 
       - name: AAB をアップロード
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: d-hub-aab
           path: build/app/outputs/bundle/release/app-release.aab
@@ -177,7 +177,7 @@ jobs:
 
       - name: 生成された Podfile / Podfile.lock を保存
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ios-podfiles
           path: |
