@@ -17,6 +17,7 @@ import 'terms_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'contact_screen.dart';
 import 'components/photo_gallery.dart';
+import 'components/delete_account_dialog.dart';
 
 /// マイページ画面
 /// プロフィール表示、興味関心タグの編集、設定メニュー
@@ -374,105 +375,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  /// 退会確認ダイアログ
-  Future<void> _showDeleteAccountDialog(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('退会の確認'),
-        content: const Text(
-          'アカウントを削除すると、以下のデータが即座に完全削除されます。\n\n'
-          '・プロフィール情報（名前・学部・写真など）\n'
-          '・スカウト受信履歴\n'
-          '・イベント申し込み履歴\n\n'
-          '削除後の復元はできません。また、同じメールアドレスで再登録することは可能です。\n\n'
-          '本当に退会しますか？',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('キャンセル'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text(
-              '次へ',
-              style: TextStyle(color: AppTheme.error),
-            ),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !context.mounted) return;
-
-    // パスワード再認証ダイアログ
-    final passwordController = TextEditingController();
-    final password = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        bool obscure = true;
-        return StatefulBuilder(
-          builder: (context, setState) => AlertDialog(
-            title: const Text('パスワードを確認'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('退会するには現在のパスワードを入力してください。'),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: passwordController,
-                  obscureText: obscure,
-                  decoration: InputDecoration(
-                    labelText: 'パスワード',
-                    border: const OutlineInputBorder(),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        obscure ? Icons.visibility_off : Icons.visibility,
-                      ),
-                      onPressed: () => setState(() => obscure = !obscure),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, null),
-                child: const Text('キャンセル'),
-              ),
-              TextButton(
-                onPressed: () =>
-                    Navigator.pop(context, passwordController.text),
-                child: const Text(
-                  '退会する',
-                  style: TextStyle(color: AppTheme.error),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-    passwordController.dispose();
-
-    if (password == null || password.isEmpty || !context.mounted) return;
-
-    final authNotifier = context.read<AuthNotifier>();
-    final result = await authNotifier.deleteAccount(password);
-
-    if (!context.mounted) return;
-    if (!result.isSuccess) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result.message),
-          backgroundColor: AppTheme.error,
-        ),
-      );
-    }
-    // 成功時はAuthNotifierがunauthenticatedに遷移するのでAuthGateが自動的にLoginScreenへ
-  }
-
   /// 設定メニュー
   Widget _buildSettingsMenu(UserProfile profile) {
     return Container(
@@ -604,7 +506,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _SettingsTile(
             icon: Icons.delete_forever_outlined,
             title: '退会する',
-            onTap: () => _showDeleteAccountDialog(context),
+            onTap: () => showDeleteAccountDialog(
+              context,
+              deletedItems: const [
+                'プロフィール情報（名前・学部・学年・興味タグ）',
+                'ブロックした団体の一覧',
+                'ログインアカウント',
+              ],
+            ),
             isDestructive: true,
           ),
         ],
