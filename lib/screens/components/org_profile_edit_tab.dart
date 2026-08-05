@@ -10,6 +10,7 @@ import '../../theme/app_theme.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../blocked_accounts_screen.dart';
 import 'photo_gallery_editor.dart';
+import 'delete_account_dialog.dart';
 
 class OrgProfileEditTab extends StatefulWidget {
   const OrgProfileEditTab({super.key});
@@ -265,6 +266,33 @@ class _OrgProfileEditTabState extends State<OrgProfileEditTab> {
                   ),
                 );
               },
+            ),
+            // App Store Review Guideline 5.1.1(v) により、アプリ内で作成できる
+            // アカウントはアプリ内で削除できなければならない。学生側の
+            // マイページと同じダイアログを使う
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(
+                Icons.delete_forever_outlined,
+                color: AppTheme.error,
+              ),
+              title: const Text(
+                '退会する',
+                style: TextStyle(fontSize: 15, color: AppTheme.error),
+              ),
+              trailing: const Icon(
+                Icons.chevron_right,
+                color: AppTheme.textSecondary,
+              ),
+              onTap: () => showDeleteAccountDialog(
+                context,
+                deletedItems: const [
+                  '団体プロフィール（団体名・紹介文・連絡先）',
+                  '掲載中のイベント',
+                  'ブロックした学生の一覧',
+                  'ログインアカウント',
+                ],
+              ),
             ),
           ],
         ),

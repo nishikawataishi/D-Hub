@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -17,6 +18,11 @@ import 'services/auth_notifier.dart';
 /// D-Hub アプリのエントリーポイント
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 縦向き固定。フォーム主体の画面構成で横向きのレイアウト検証をしていないため、
+  // 崩れた画面を審査で見せないよう向きを固定する（Info.plist 側も縦のみ）
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   // エミュレータ接続: --dart-define=USE_EMULATOR=true のときのみ有効
