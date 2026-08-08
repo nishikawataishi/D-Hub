@@ -270,10 +270,17 @@ exports.verifyCode = onCall(async (request) => {
  * あえて消さないもの: reports / contacts
  *   通報・問い合わせは運営の対応記録（規約第7条）で、通報者保護のためにも
  *   被通報者の退会で消えてはいけない。本人の識別情報ではなく事案の記録として保持する。
+ *
+ * ⚠️ 削除順序は「権限の失効が先、他人所有データの削除は後」で固定すること。
+ *   理由はフェーズ1のコメントを参照。逆にすると権限昇格の窓が開く。
  */
 const RECENT_AUTH_WINDOW_SECONDS = 10 * 60;
 
-exports.deleteMyAccount = onCall(async (request) => {
+// 自団体イベントの削除を流す同時実行数。1件ずつ await すると実行時間が
+// イベント件数に比例し、タイムアウトまでの余裕を呼び出し元が決められてしまう。
+const EVENT_DELETE_CONCURRENCY = 20;
+
+exports.deleteMyAccount = onCall({ timeoutSeconds: 540 }, async (request) => {
     if (!request.auth) {
         throw new HttpsError("unauthenticated", "ログインが必要です。");
     }
@@ -293,6 +300,30 @@ exports.deleteMyAccount = onCall(async (request) => {
             "セキュリティのため、パスワードを再入力してからやり直してください。",
         );
     }
+
+    // ══ フェーズ1: 権限の失効（必ず最初にやる） ══
+    //
+    // ルールの認可はすべて users/{uid} と organizations/{uid} を get() して
+    // 判定しているので、この2つを消した時点で参照先が失われ、以降どのルールも
+    // fail-closed になる（isVerifiedOrg() など）。
+    //
+    // ⚠️ これをフェーズ2より後ろに動かしてはいけない。
+    // フェーズ2では「他人が所有する」users/{他人}/blocks/{uid} を消すが、
+    // isNotBlockedByTarget()（firestore.rules）はルール中で唯一の否定存在チェック
+    // （!exists）で、参照先が消えると deny ではなく allow に反転する。
+    // つまりブロック記録の削除はスカウト送信権限を「与える」操作である。
+    // 権限を残したままこれを先に消すと、途中で関数が落ちたときに
+    // 「自分をブロックしていた学生全員のブロックが解除され、団体としては
+    // 有効なまま」という状態が生まれ、ブロックを踏み越えて再送できてしまう。
+    // 実行時間はイベント件数などで呼び出し元が引き延ばせるため、これは
+    // 偶発的な競合ではなく狙って作れる状態だった。
+    await db.recursiveDelete(db.collection("organizations").doc(uid));
+    await db.recursiveDelete(db.collection("users").doc(uid));
+    await getAuth().revokeRefreshTokens(uid);
+
+    // ══ フェーズ2: 残りのデータ ══
+    // ここから先で失敗しても、呼び出し元はもう何の権限も持たない。
+    // この関数は冪等なので、再ログインしてもう一度呼べば続きから掃除できる。
 
     // 個別の削除失敗で全体を止めず、最後にまとめて成否を判断する
     let failedDeletes = 0;
@@ -318,32 +349,31 @@ exports.deleteMyAccount = onCall(async (request) => {
         .get();
     myApplications.docs.forEach((doc) => bulkWriter.delete(doc.ref));
 
+    // ── 自団体のイベント（applications サブコレクションごと消す） ──
+    // BulkWriter を共有すると recursiveDelete はそれを close せずに使うので、
+    // まとめて並列に流せる。同時実行数は絞ってメモリと接続数を抑える。
+    const ownedEvents = await db
+        .collection("events")
+        .where("organizationId", "==", uid)
+        .get();
+    for (let i = 0; i < ownedEvents.docs.length; i += EVENT_DELETE_CONCURRENCY) {
+        const chunk = ownedEvents.docs.slice(i, i + EVENT_DELETE_CONCURRENCY);
+        await Promise.all(chunk.map((doc) => db.recursiveDelete(doc.ref, bulkWriter)));
+    }
+
     // ── 他人が自分をブロックしている側の記録 ──
     // blocks は「ドキュメントIDがブロック相手のUID」かつ targetName（＝相手の氏名）を
     // 持つため、消さないと退会者の氏名が他人のサブコレクションに残る。
     // ドキュメントIDでの collectionGroup 絞り込みができないので全件走査する。
     // ブロックは件数が少なく現在の規模では許容範囲（将来 targetId フィールドを
     // 持たせればインデックス付きクエリにできる）。
+    // フェーズ1で権限を失効させた後なので、ここで消しても何も復活しない。
     const allBlocks = await db.collectionGroup("blocks").get();
     allBlocks.docs
         .filter((doc) => doc.id === uid)
         .forEach((doc) => bulkWriter.delete(doc.ref));
 
     await bulkWriter.close();
-
-    // ── 自団体のイベント（applications サブコレクションごと消す） ──
-    const ownedEvents = await db
-        .collection("events")
-        .where("organizationId", "==", uid)
-        .get();
-    for (const doc of ownedEvents.docs) {
-        await db.recursiveDelete(doc.ref);
-    }
-
-    // ── 本体ドキュメント（private / blocks サブコレクションごと消す） ──
-    // 学生か団体かを判定せず両方消す。該当しない側は存在しないので何も起きない。
-    await db.recursiveDelete(db.collection("users").doc(uid));
-    await db.recursiveDelete(db.collection("organizations").doc(uid));
 
     // ── Storage の画像 ──
     // アイコン・プロフィール写真・団体ロゴ／活動写真。差し替えで残っていた
@@ -359,8 +389,10 @@ exports.deleteMyAccount = onCall(async (request) => {
     }
 
     // ── Auth ユーザー ──
-    // 必ず最後。先に消すと、途中で失敗したときに本人が再ログインして
-    // やり直すことすらできなくなる。
+    // 最後に消す。先に消すと、途中で失敗したときに本人が再ログインして
+    // やり直すことすらできなくなるため。
+    // 「権限を持ったまま生き残る」危険はフェーズ1で潰してあるので、
+    // ここまで引っ張っても安全。この時点の呼び出し元は認可上ただの匿名ユーザー。
     if (failedDeletes > 0) {
         logger.error(`deleteMyAccount incomplete: uid=${uid} failures=${failedDeletes}`);
         throw new HttpsError(
