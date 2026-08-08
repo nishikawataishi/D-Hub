@@ -1,37 +1,50 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    
+
     function isAuthenticated() {
       return request.auth != null;
     }
-    
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
     function isImage() {
       return request.resource.contentType.matches('image/.*');
     }
-    
+
     function isLessThan5MB() {
       return request.resource.size < 5 * 1024 * 1024;
     }
 
+    // ⚠️ delete のルールに isImage() / isLessThan5MB() を含めてはいけない。
+    // 削除リクエストでは request.resource が null になるため、これらを条件に
+    // 入れると削除が「常に」拒否される。以前は create/update/delete をまとめて
+    // allow write で書いていたため、退会時もアイコン差し替え時も画像が
+    // 一切消えず Storage に残り続けていた。
+
     // ユーザーアイコン
     match /users/{userId}/icon/{fileName} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && request.auth.uid == userId && isImage() && isLessThan5MB();
+      allow create, update: if isOwner(userId) && isImage() && isLessThan5MB();
+      allow delete: if isOwner(userId);
     }
 
     // ユーザープロフィール写真（ギャラリー用）
     match /users/{userId}/photos/{fileName} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && request.auth.uid == userId && isImage() && isLessThan5MB();
+      allow create, update: if isOwner(userId) && isImage() && isLessThan5MB();
+      allow delete: if isOwner(userId);
     }
-    
+
     // 団体ロゴ・活動写真
     match /organizations/{orgId}/{folder}/{fileName} {
       // 誰でも読み取れる
       allow read: if isAuthenticated();
       // orgIdとユーザーIDが一致する場合のみアップロード可能（5MB以下の画像のみ）
-      allow write: if isAuthenticated() && request.auth.uid == orgId && isImage() && isLessThan5MB();
+      allow create, update: if isOwner(orgId) && isImage() && isLessThan5MB();
+      allow delete: if isOwner(orgId);
     }
   }
 }

@@ -149,8 +149,15 @@ service cloud.firestore {
                       && get(/databases/$(database)/documents/events/$(eventId)).data.organizationId == request.auth.uid
                       && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt']);
 
-        // 削除（キャンセル）: 申し込んだ学生本人のみ
-        allow delete: if isAuthenticated() && request.auth.uid == applicationId;
+        // 削除: 申し込んだ学生本人（キャンセル）、イベント主催団体、管理者。
+        // 主催団体を含めるのは、団体がイベントを消したときに applications が
+        // 孤児として残るのを防ぐため（サブコレクションは親を消しても残る）。
+        // ⚠️ 主催団体判定は events ドキュメントを参照するので、イベント本体より
+        // 先に applications を消すこと。順序を逆にすると参照先が消えて拒否される。
+        allow delete: if isAdmin() || (isAuthenticated() && (
+          request.auth.uid == applicationId ||
+          get(/databases/$(database)/documents/events/$(eventId)).data.organizationId == request.auth.uid
+        ));
       }
     }
 
@@ -239,6 +246,13 @@ service cloud.firestore {
                     && request.resource.data.organizationId == request.auth.uid
                     && isNotBlockedByTarget()
                     && isValidScoutTemplate();
+
+      // 削除は当事者（スカウト対象の学生 or 送信元団体）と管理者のみ。
+      // delete ルールが無いと退会時にスカウトが消せず、学生名やLINE URLを含む
+      // レコードが残り続ける（規約第14条2に違反する）。管理者も消せなかった。
+      allow delete: if isAdmin() || (isAuthenticated() &&
+        (request.auth.uid == resource.data.targetUserId ||
+         request.auth.uid == resource.data.organizationId));
     }
 
     // ==========================================================

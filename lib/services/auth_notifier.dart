@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'auth_service.dart';
 
 /// 認証状態を表すEnum
@@ -233,56 +234,15 @@ class AuthNotifier extends ChangeNotifier {
   }
 
   /// アカウント削除（退会）
-  /// 再認証 → Firestoreデータ削除 → Firebase Authアカウント削除
-  /// 退会時に blocks サブコレクションを削除する
   ///
-  /// 学生と団体でパスが異なるが、退会時点でどちらのアカウントか判定するより
-  /// 両方試す方が確実。該当しない側は空なので何も起きない。
-  Future<void> _deleteBlocks(String parentCollection, String uid) async {
-    try {
-      final blocks = await _firestore
-          .collection(parentCollection)
-          .doc(uid)
-          .collection('blocks')
-          .get();
-      if (blocks.docs.isEmpty) return;
-      final batch = _firestore.batch();
-      for (final doc in blocks.docs) {
-        batch.delete(doc.reference);
-      }
-      await batch.commit();
-    } catch (e) {
-      // ブロック情報が消せなくても退会自体は続行する
-      debugPrint('AuthNotifier._deleteBlocks($parentCollection) error: $e');
-    }
-  }
-
-  /// 退会時に、その団体が掲載しているイベントを削除する
+  /// 再認証したうえで Cloud Function `deleteMyAccount` を呼ぶだけ。
+  /// Firestore・Storage・Auth の削除はすべてサーバー側（Admin SDK）で行う。
   ///
-  /// 団体ドキュメントだけ消すとイベントが主催者不在のまま一覧に残り、
-  /// 学生が存在しない団体のイベントに申し込めてしまう。
-  /// events の delete ルールは isVerifiedOrg() を要求するため、
-  /// 必ず organizations ドキュメントを消す「前」に呼ぶこと。
-  ///
-  /// 学生アカウントでは organizationId が一致するイベントが無いので空振りする。
-  Future<void> _deleteOwnedEvents(String uid) async {
-    try {
-      final events = await _firestore
-          .collection('events')
-          .where('organizationId', isEqualTo: uid)
-          .get();
-      if (events.docs.isEmpty) return;
-      final batch = _firestore.batch();
-      for (final doc in events.docs) {
-        batch.delete(doc.reference);
-      }
-      await batch.commit();
-    } catch (e) {
-      // イベントが消せなくても退会自体は続行する
-      debugPrint('AuthNotifier._deleteOwnedEvents error: $e');
-    }
-  }
-
+  /// クライアントで逐次削除していた頃は、規約第14条2「登録データは削除されます」を
+  /// 満たせていなかった。学生は自分の申し込み（events/{id}/applications）を
+  /// 列挙できず（list ルールが主催団体のみ）、Storage の画像も消せないため。
+  /// さらに逐次削除は途中で失敗しても続行していたので、Auth ユーザーだけ消えて
+  /// 誰も再試行できない孤児データが残りうる状態だった。
   Future<AuthResult> deleteAccount(String password) async {
     final user = _auth.currentUser;
     if (user == null || user.email == null) {
@@ -297,31 +257,14 @@ class AuthNotifier extends ChangeNotifier {
       );
       await user.reauthenticateWithCredential(credential);
 
-      final uid = user.uid;
+      // 再認証後の auth_time を反映したトークンに更新してから呼ぶ。
+      // サーバー側が直近の再認証を必須にしているため、これを省くと弾かれる。
+      await user.getIdToken(true);
 
-      // ブロック情報を先に削除する。親ドキュメントを消してもサブコレクションは
-      // 残るため、消さないと本人以外誰も触れないデータが残り続ける
-      await _deleteBlocks('users', uid);
-      await _deleteBlocks('organizations', uid);
+      await FirebaseFunctions.instance.httpsCallable('deleteMyAccount').call();
 
-      // 掲載中のイベントを先に消す（organizations ドキュメント削除後は
-      // isVerifiedOrg() が false になり削除できなくなる）
-      await _deleteOwnedEvents(uid);
-
-      // Firestoreデータ削除
-      // 存在しないドキュメントの削除はルール評価（resource.data参照）で
-      // permission-deniedになるため、存在確認してから削除する
-      final userDoc = await _firestore.collection('users').doc(uid).get();
-      if (userDoc.exists) {
-        await _firestore.collection('users').doc(uid).delete();
-      }
-      final orgDoc = await _firestore.collection('organizations').doc(uid).get();
-      if (orgDoc.exists) {
-        await _firestore.collection('organizations').doc(uid).delete();
-      }
-
-      // Firebase Auth アカウント削除
-      await user.delete();
+      // Auth ユーザーはサーバー側で削除済み。ローカルの状態だけ落とす。
+      await _auth.signOut();
 
       _user = null;
       _status = AuthStatus.unauthenticated;
@@ -329,6 +272,13 @@ class AuthNotifier extends ChangeNotifier {
       return AuthResult.success('アカウントを削除しました');
     } on FirebaseAuthException catch (e) {
       return AuthResult.failure(_mapFirebaseError(e.code));
+    } on FirebaseFunctionsException catch (e) {
+      if (e.code == 'failed-precondition') {
+        return AuthResult.failure(
+          'セキュリティのため、もう一度パスワードを入力してやり直してください',
+        );
+      }
+      return AuthResult.failure(e.message ?? 'アカウントの削除に失敗しました');
     } catch (e) {
       return AuthResult.failure('アカウントの削除に失敗しました');
     }

@@ -6,6 +6,7 @@ const crypto = require("crypto");
 const admin = require("firebase-admin");
 const { Timestamp, FieldValue } = require("firebase-admin/firestore");
 const { getAuth } = require("firebase-admin/auth");
+const { getStorage } = require("firebase-admin/storage");
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -251,6 +252,126 @@ exports.verifyCode = onCall(async (request) => {
     });
 
     return result;
+});
+
+/**
+ * 退会（アカウント削除）を行う Cloud Function
+ *
+ * 規約第14条2「登録データは削除されます」を実際に満たすため、クライアントからの
+ * 逐次削除ではなくサーバー側（Admin SDK）で一括削除する。
+ *
+ * クライアントでは消しきれない理由:
+ *  - 学生は自分の申し込み（events/{id}/applications）を列挙できない。
+ *    list ルールは主催団体のみに許可されており、collectionGroup も張っていない
+ *  - Storage は delete が許可されておらず、storage_service に削除メソッド自体が無い
+ *  - 逐次削除は best-effort で、途中で失敗すると Auth ユーザーだけ消えて
+ *    本人も管理者も再試行できない孤児データが残る
+ *
+ * あえて消さないもの: reports / contacts
+ *   通報・問い合わせは運営の対応記録（規約第7条）で、通報者保護のためにも
+ *   被通報者の退会で消えてはいけない。本人の識別情報ではなく事案の記録として保持する。
+ */
+const RECENT_AUTH_WINDOW_SECONDS = 10 * 60;
+
+exports.deleteMyAccount = onCall(async (request) => {
+    if (!request.auth) {
+        throw new HttpsError("unauthenticated", "ログインが必要です。");
+    }
+
+    const uid = request.auth.uid;
+
+    // 不可逆な操作なので直近の再認証を必須にする。ID トークンが漏れただけで
+    // アカウントを消されないようにするため。
+    // クライアントは reauthenticateWithCredential の後に getIdToken(true) で
+    // トークンを更新してから呼ぶこと（auth_time が更新されない）。
+    const authTime = request.auth.token.auth_time;
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (typeof authTime !== "number" ||
+        nowSeconds - authTime > RECENT_AUTH_WINDOW_SECONDS) {
+        throw new HttpsError(
+            "failed-precondition",
+            "セキュリティのため、パスワードを再入力してからやり直してください。",
+        );
+    }
+
+    // 個別の削除失敗で全体を止めず、最後にまとめて成否を判断する
+    let failedDeletes = 0;
+    const bulkWriter = db.bulkWriter();
+    bulkWriter.onWriteError((error) => {
+        if (error.failedAttempts < 3) return true;
+        failedDeletes++;
+        logger.error(`Delete failed: ${error.documentRef.path}`, error);
+        return false;
+    });
+
+    // ── スカウト（学生として受け取った分・団体として送った分の両方） ──
+    for (const field of ["targetUserId", "organizationId"]) {
+        const snap = await db.collection("scouts").where(field, "==", uid).get();
+        snap.docs.forEach((doc) => bulkWriter.delete(doc.ref));
+    }
+
+    // ── 学生として出したイベント申し込み ──
+    // collectionGroup クエリなので firestore.indexes.json の fieldOverrides が必要
+    const myApplications = await db
+        .collectionGroup("applications")
+        .where("studentId", "==", uid)
+        .get();
+    myApplications.docs.forEach((doc) => bulkWriter.delete(doc.ref));
+
+    // ── 他人が自分をブロックしている側の記録 ──
+    // blocks は「ドキュメントIDがブロック相手のUID」かつ targetName（＝相手の氏名）を
+    // 持つため、消さないと退会者の氏名が他人のサブコレクションに残る。
+    // ドキュメントIDでの collectionGroup 絞り込みができないので全件走査する。
+    // ブロックは件数が少なく現在の規模では許容範囲（将来 targetId フィールドを
+    // 持たせればインデックス付きクエリにできる）。
+    const allBlocks = await db.collectionGroup("blocks").get();
+    allBlocks.docs
+        .filter((doc) => doc.id === uid)
+        .forEach((doc) => bulkWriter.delete(doc.ref));
+
+    await bulkWriter.close();
+
+    // ── 自団体のイベント（applications サブコレクションごと消す） ──
+    const ownedEvents = await db
+        .collection("events")
+        .where("organizationId", "==", uid)
+        .get();
+    for (const doc of ownedEvents.docs) {
+        await db.recursiveDelete(doc.ref);
+    }
+
+    // ── 本体ドキュメント（private / blocks サブコレクションごと消す） ──
+    // 学生か団体かを判定せず両方消す。該当しない側は存在しないので何も起きない。
+    await db.recursiveDelete(db.collection("users").doc(uid));
+    await db.recursiveDelete(db.collection("organizations").doc(uid));
+
+    // ── Storage の画像 ──
+    // アイコン・プロフィール写真・団体ロゴ／活動写真。差し替えで残っていた
+    // 古いファイルも prefix ごと消えるので、ここで一掃される。
+    const bucket = getStorage().bucket();
+    for (const prefix of [`users/${uid}/`, `organizations/${uid}/`]) {
+        try {
+            await bucket.deleteFiles({ prefix });
+        } catch (error) {
+            failedDeletes++;
+            logger.error(`Storage delete failed: ${prefix}`, error);
+        }
+    }
+
+    // ── Auth ユーザー ──
+    // 必ず最後。先に消すと、途中で失敗したときに本人が再ログインして
+    // やり直すことすらできなくなる。
+    if (failedDeletes > 0) {
+        logger.error(`deleteMyAccount incomplete: uid=${uid} failures=${failedDeletes}`);
+        throw new HttpsError(
+            "internal",
+            "データの削除に失敗しました。時間をおいて再度お試しください。",
+        );
+    }
+
+    await getAuth().deleteUser(uid);
+    logger.info(`Account fully deleted: uid=${uid}`);
+    return { success: true };
 });
 
 /**
