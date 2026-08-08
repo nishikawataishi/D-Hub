@@ -606,3 +606,63 @@ test("scouts create: ブロックを解除すれば再び届く", async () => {
     templateId: 4, isRead: false,
   }));
 });
+
+// ==========================================================
+// 8. 退会時のデータ削除（規約第14条2のリグレッション）
+// ==========================================================
+// scouts には delete ルールが存在せず、退会しても学生名やLINE URLを含む
+// スカウトが残り続けていた（管理者ですら消せなかった）。
+// applications は本人しか消せず、団体がイベントを消すと孤児化していた。
+
+/** イベント申し込みをルール無効で投入する */
+const seedApplication = async (studentId = STUDENT) => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(
+      doc(ctx.firestore(), "events", "event_of_verified", "applications", studentId),
+      { studentId, studentName: "学生A", status: "applied", appliedAt: new Date() },
+    );
+  });
+};
+
+const applicationRef = (db, studentId = STUDENT) =>
+  doc(db, "events", "event_of_verified", "applications", studentId);
+
+test("scouts delete: 対象学生は自分宛のスカウトを削除できる", async () => {
+  await assertSucceeds(deleteDoc(doc(as(STUDENT), "scouts", "scout_to_A")));
+});
+
+test("scouts delete: 送信元団体は自分が送ったスカウトを削除できる", async () => {
+  await assertSucceeds(deleteDoc(doc(as(ORG_VERIFIED), "scouts", "scout_to_A")));
+});
+
+test("scouts delete: 管理者は削除できる", async () => {
+  await assertSucceeds(deleteDoc(doc(asAdmin(), "scouts", "scout_to_A")));
+});
+
+test("scouts delete: 無関係な学生・団体・未認証は削除できない", async () => {
+  await assertFails(deleteDoc(doc(as(OTHER_STUDENT), "scouts", "scout_to_A")));
+  await assertFails(deleteDoc(doc(as(ORG_PENDING), "scouts", "scout_to_A")));
+  await assertFails(deleteDoc(doc(asAnon(), "scouts", "scout_to_A")));
+});
+
+test("applications delete: 申し込んだ学生本人はキャンセルできる", async () => {
+  await seedApplication();
+  await assertSucceeds(deleteDoc(applicationRef(as(STUDENT))));
+});
+
+test("applications delete: イベント主催団体は削除できる", async () => {
+  await seedApplication();
+  await assertSucceeds(deleteDoc(applicationRef(as(ORG_VERIFIED))));
+});
+
+test("applications delete: 管理者は削除できる", async () => {
+  await seedApplication();
+  await assertSucceeds(deleteDoc(applicationRef(asAdmin())));
+});
+
+test("applications delete: 別の学生・別団体・未認証は削除できない", async () => {
+  await seedApplication();
+  await assertFails(deleteDoc(applicationRef(as(OTHER_STUDENT))));
+  await assertFails(deleteDoc(applicationRef(as(ORG_PENDING))));
+  await assertFails(deleteDoc(applicationRef(asAnon())));
+});
