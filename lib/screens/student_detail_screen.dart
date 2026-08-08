@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_theme.dart';
+import '../models/account_role.dart';
 import '../models/user_profile.dart';
 import '../services/firestore_service.dart';
+import 'components/moderation_menu.dart';
 import 'components/photo_gallery.dart';
+import 'components/scout_compose_dialog.dart';
 
 /// 学生プロフィールの詳細閲覧とスカウト送信を行う画面
 class StudentDetailScreen extends StatefulWidget {
@@ -16,10 +19,21 @@ class StudentDetailScreen extends StatefulWidget {
 }
 
 class _StudentDetailScreenState extends State<StudentDetailScreen> {
-  Future<void> _showScoutDialog() async {
-    final messageController = TextEditingController();
-    bool isSending = false;
+  /// 通報時に運営へ共有するプロフィールの内容（利用規約 第7条2）
+  Map<String, dynamic> _profileSnapshot() {
+    final student = widget.student;
+    return {
+      'name': student.name,
+      'faculty': student.faculty,
+      'grade': student.grade,
+      'mainCampus': student.mainCampus.label,
+      'interests': student.interests,
+      if (student.iconUrl != null) 'iconUrl': student.iconUrl,
+      'photoUrls': student.photoUrls,
+    };
+  }
 
+  Future<void> _showScoutDialog() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
@@ -36,121 +50,24 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
 
     if (!mounted) return;
 
-    await showDialog(
+    // 本文は定型文に限定されるため、選択UIはダイアログ側が受け持つ
+    final sent = await showDialog<bool>(
       context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: Text('${widget.student.name} さんにスカウト送信'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    'スカウトメッセージを入力してください。\n(送信済みのメッセージは学生の画面に表示されます)',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: messageController,
-                    maxLines: 4,
-                    decoration: InputDecoration(
-                      hintText: '例: あなたのプロフィールを見て興味を持ちました！ぜひ一度お話ししませんか？',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(
-                          color: AppTheme.primary,
-                          width: 2,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: isSending ? null : () => Navigator.pop(context),
-                  child: const Text(
-                    'キャンセル',
-                    style: TextStyle(color: AppTheme.textSecondary),
-                  ),
-                ),
-                ElevatedButton(
-                  onPressed: isSending
-                      ? null
-                      : () async {
-                          if (messageController.text.trim().isEmpty) return;
-
-                          setDialogState(() {
-                            isSending = true;
-                          });
-
-                          try {
-                            await FirestoreService().sendScout(
-                              targetUserId: widget.student.id,
-                              senderOrg: senderOrg,
-                              message: messageController.text.trim(),
-                            );
-
-                            if (context.mounted) {
-                              Navigator.pop(context); // ダイアログを閉じる
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    '${widget.student.name} さんにスカウトを送信しました！',
-                                  ),
-                                  backgroundColor: AppTheme.success,
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
-                            }
-                          } catch (e) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('送信に失敗しました: $e'),
-                                  backgroundColor: AppTheme.error,
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
-                            }
-                          } finally {
-                            if (mounted) {
-                              setDialogState(() {
-                                isSending = false;
-                              });
-                            }
-                          }
-                        },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: isSending
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              Colors.white,
-                            ),
-                          ),
-                        )
-                      : const Text('送信する'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+      builder: (context) => ScoutComposeDialog(
+        student: widget.student,
+        senderOrg: senderOrg,
+      ),
     );
+
+    if (sent == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${widget.student.name} さんにスカウトを送信しました！'),
+          backgroundColor: AppTheme.success,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   @override
@@ -169,6 +86,16 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
         backgroundColor: AppTheme.surface,
         elevation: 0,
         iconTheme: const IconThemeData(color: AppTheme.textPrimary),
+        actions: [
+          ModerationMenu(
+            viewerRole: AccountRole.organization,
+            targetId: widget.student.id,
+            targetName: widget.student.name,
+            contentSnapshot: _profileSnapshot(),
+            // ブロックした学生は一覧から消えるため、詳細も開いたままにしない
+            onBlocked: () => Navigator.pop(context),
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
@@ -206,7 +133,7 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
 
             // 学部・回生・キャンパス
             Text(
-              '${widget.student.faculty} ${widget.student.grade}回生 • ${widget.student.mainCampus.name}',
+              '${widget.student.faculty} ${widget.student.grade}回生 • ${widget.student.mainCampus.label}',
               style: const TextStyle(
                 fontSize: 16,
                 color: AppTheme.textSecondary,

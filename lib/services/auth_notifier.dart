@@ -234,6 +234,55 @@ class AuthNotifier extends ChangeNotifier {
 
   /// アカウント削除（退会）
   /// 再認証 → Firestoreデータ削除 → Firebase Authアカウント削除
+  /// 退会時に blocks サブコレクションを削除する
+  ///
+  /// 学生と団体でパスが異なるが、退会時点でどちらのアカウントか判定するより
+  /// 両方試す方が確実。該当しない側は空なので何も起きない。
+  Future<void> _deleteBlocks(String parentCollection, String uid) async {
+    try {
+      final blocks = await _firestore
+          .collection(parentCollection)
+          .doc(uid)
+          .collection('blocks')
+          .get();
+      if (blocks.docs.isEmpty) return;
+      final batch = _firestore.batch();
+      for (final doc in blocks.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+    } catch (e) {
+      // ブロック情報が消せなくても退会自体は続行する
+      debugPrint('AuthNotifier._deleteBlocks($parentCollection) error: $e');
+    }
+  }
+
+  /// 退会時に、その団体が掲載しているイベントを削除する
+  ///
+  /// 団体ドキュメントだけ消すとイベントが主催者不在のまま一覧に残り、
+  /// 学生が存在しない団体のイベントに申し込めてしまう。
+  /// events の delete ルールは isVerifiedOrg() を要求するため、
+  /// 必ず organizations ドキュメントを消す「前」に呼ぶこと。
+  ///
+  /// 学生アカウントでは organizationId が一致するイベントが無いので空振りする。
+  Future<void> _deleteOwnedEvents(String uid) async {
+    try {
+      final events = await _firestore
+          .collection('events')
+          .where('organizationId', isEqualTo: uid)
+          .get();
+      if (events.docs.isEmpty) return;
+      final batch = _firestore.batch();
+      for (final doc in events.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+    } catch (e) {
+      // イベントが消せなくても退会自体は続行する
+      debugPrint('AuthNotifier._deleteOwnedEvents error: $e');
+    }
+  }
+
   Future<AuthResult> deleteAccount(String password) async {
     final user = _auth.currentUser;
     if (user == null || user.email == null) {
@@ -249,6 +298,15 @@ class AuthNotifier extends ChangeNotifier {
       await user.reauthenticateWithCredential(credential);
 
       final uid = user.uid;
+
+      // ブロック情報を先に削除する。親ドキュメントを消してもサブコレクションは
+      // 残るため、消さないと本人以外誰も触れないデータが残り続ける
+      await _deleteBlocks('users', uid);
+      await _deleteBlocks('organizations', uid);
+
+      // 掲載中のイベントを先に消す（organizations ドキュメント削除後は
+      // isVerifiedOrg() が false になり削除できなくなる）
+      await _deleteOwnedEvents(uid);
 
       // Firestoreデータ削除
       // 存在しないドキュメントの削除はルール評価（resource.data参照）で

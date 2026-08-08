@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
+import '../models/account_role.dart';
 import '../models/scout.dart';
 import 'scout_detail_screen.dart';
 
@@ -17,6 +20,30 @@ class ScoutScreen extends StatefulWidget {
 
 class ScoutScreenState extends State<ScoutScreen> {
   final _firestoreService = FirestoreService();
+
+  /// ブロックした団体のID。ブロック前に届いていたスカウトも隠す（利用規約 第8条2）
+  Set<String> _blockedOrgIds = const {};
+  StreamSubscription<Set<String>>? _blockedSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _blockedSubscription = _firestoreService
+        .getBlockedIds(AccountRole.student)
+        .listen(
+          (ids) {
+            if (mounted) setState(() => _blockedOrgIds = ids);
+          },
+          // ログアウト直後は未認証のまま届くことがある。握りつぶして落とさない
+          onError: (Object e) => debugPrint('ScoutScreen blocks stream: $e'),
+        );
+  }
+
+  @override
+  void dispose() {
+    _blockedSubscription?.cancel();
+    super.dispose();
+  }
 
   /// 相対時間の表示（今日、昨日、N日前）
   String _formatRelativeTime(DateTime dateTime) {
@@ -86,13 +113,12 @@ class ScoutScreenState extends State<ScoutScreen> {
             );
           }
 
-          // Firestoreにスカウトデータがあればそれを使用
-          final hasFirestoreData =
-              snapshot.hasData && snapshot.data!.isNotEmpty;
+          // ブロックした団体からのスカウトは表示しない
+          final scouts = (snapshot.data ?? const <Scout>[])
+              .where((s) => !_blockedOrgIds.contains(s.organizationId))
+              .toList();
 
-          if (hasFirestoreData) {
-            // Firestoreデータで表示
-            final scouts = snapshot.data!;
+          if (scouts.isNotEmpty) {
             return ListView.separated(
               padding: const EdgeInsets.all(16),
               itemCount: scouts.length,
@@ -153,7 +179,7 @@ class _ScoutTileFromMap extends StatelessWidget {
       orgLogoUrl: scout.organizationLogoUrl,
       orgName: scout.organizationName,
       category: scout.organizationCategory,
-      message: scout.message,
+      message: scout.body,
       relativeTime: relativeTime,
       onTap: onTap,
     );
