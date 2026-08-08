@@ -2,7 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../data/mock_data.dart';
+import '../models/account_role.dart';
+import '../models/blocked_account.dart';
+import '../models/report.dart';
 import '../models/scout.dart';
+import '../models/scout_template.dart';
 import '../models/event_application.dart';
 
 /// Firestoreのデータ操作を行うサービス
@@ -172,16 +176,26 @@ class FirestoreService {
     });
   }
 
-  /// スカウトを送信する（トランザクションで重複チェック + 作成をアトミックに実行）
+  /// スカウトを送信する
+  ///
+  /// 本文は自由記述できず、[template] で選んだ定型文に限られる。
+  /// [templateArg] は定型文に埋め込む値で、対象学生が実際に登録している値
+  /// （タグ・キャンパス・学年）または自団体のイベント名でなければ
+  /// Firestoreルール側で拒否される。
   Future<void> sendScout({
     required String targetUserId,
     required Organization senderOrg,
-    required String message,
+    required ScoutTemplate template,
+    String? templateArg,
+    String? templateEventId,
   }) async {
-    // メッセージ長バリデーション（Firestoreルールと一致）
-    final trimmedMessage = message.trim();
-    if (trimmedMessage.isEmpty || trimmedMessage.length > 500) {
-      throw Exception('メッセージは1〜500文字で入力してください。');
+    // ルールと同じ条件をクライアント側でも検証し、分かりやすいエラーを返す
+    if (template.needsArg && (templateArg == null || templateArg.isEmpty)) {
+      throw Exception('この定型文には埋め込む値の選択が必要です。');
+    }
+    if (template.slot == ScoutSlot.event &&
+        (templateEventId == null || templateEventId.isEmpty)) {
+      throw Exception('招待するイベントを選択してください。');
     }
 
     // 学生の情報を取得してアイコンURLを保持
@@ -197,7 +211,9 @@ class FirestoreService {
       organizationCategory: senderOrg.categories.isNotEmpty
           ? senderOrg.categories.first.label
           : OrgCategory.all.label,
-      message: trimmedMessage,
+      templateId: template.id,
+      templateArg: template.needsArg ? templateArg : null,
+      templateEventId: templateEventId,
       isRead: false,
       sentAt: now,
       organizationInstagramUrl: senderOrg.instagramUrl,
@@ -255,6 +271,19 @@ class FirestoreService {
               .map((doc) => Event.fromFirestore(doc.data(), doc.id))
               .toList(),
         );
+  }
+
+  /// 特定団体の開催予定イベントを一度だけ取得（スカウトの招待先選択用）
+  Future<List<Event>> fetchUpcomingEventsByOrganization(String orgId) async {
+    final snapshot = await _db
+        .collection('events')
+        .where('organizationId', isEqualTo: orgId)
+        .where('startAt', isGreaterThan: Timestamp.now())
+        .orderBy('startAt')
+        .get();
+    return snapshot.docs
+        .map((doc) => Event.fromFirestore(doc.data(), doc.id))
+        .toList();
   }
 
   /// イベントを作成
@@ -532,7 +561,8 @@ class FirestoreService {
         'organizationName': 'D-spirits',
         'organizationEmoji': '🏀',
         'organizationCategory': 'スポーツ',
-        'message': 'Firestoreからのテストスカウトです！動作確認おめでとうございます！🎉',
+        // 定型文「見学のお誘い」。埋め込む値を持たないので単体で成立する
+        'templateId': ScoutTemplate.generic.id,
         'sentAt': FieldValue.serverTimestamp(),
         'isRead': false,
       });
@@ -582,6 +612,152 @@ class FirestoreService {
       'status': status,
       'respondedAt': FieldValue.serverTimestamp(),
     });
+  }
+
+  // ─── 通報（Reports） ───
+
+  /// 通報を送信する
+  ///
+  /// [snapshot] には通報時点の対象コンテンツを入れる。利用規約 第7条2により、
+  /// 通報するとこの内容が運営に共有されることにユーザーは同意している。
+  /// 保存後の通報は運営しか読めない（Firestoreルールで read を管理者に限定）ため、
+  /// 誰が通報したかは相手に伝わらない（第7条4）。
+  Future<void> submitReport({
+    required AccountRole reporterRole,
+    required ReportTargetType targetType,
+    required String targetId,
+    required String targetName,
+    required ReportReason reason,
+    String detail = '',
+    Map<String, dynamic> snapshot = const {},
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) throw Exception('ログインが必要です');
+    if (targetId == user.uid) throw Exception('自分自身は通報できません。');
+
+    final trimmedDetail = detail.trim();
+    if (trimmedDetail.length > 1000) {
+      throw Exception('補足は1000文字以内で入力してください。');
+    }
+
+    await _db.collection('reports').add({
+      'reporterId': user.uid,
+      'reporterRole': reporterRole.id,
+      'targetType': targetType.id,
+      'targetId': targetId,
+      'targetName': targetName,
+      'reason': reason.id,
+      'detail': trimmedDetail,
+      'snapshot': snapshot,
+      'status': 'open',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// 通報一覧を取得（管理者用）
+  Stream<List<Report>> getReportsForAdmin({required String status}) {
+    return _db
+        .collection('reports')
+        .where('status', isEqualTo: status)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => Report.fromFirestore(doc.data(), doc.id))
+              .toList(),
+        );
+  }
+
+  /// 通報のステータスを更新（管理者用）
+  Future<void> updateReportStatus(String reportId, String status) async {
+    await _db.collection('reports').doc(reportId).update({
+      'status': status,
+      'reviewedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  // ─── ブロック（Blocks） ───
+
+  /// ブロック情報の保存先。学生は users/{uid}/blocks、団体は organizations/{uid}/blocks
+  CollectionReference<Map<String, dynamic>> _blocksRef(
+    AccountRole role,
+    String uid,
+  ) {
+    return _db
+        .collection(role.blocksParentCollection)
+        .doc(uid)
+        .collection('blocks');
+  }
+
+  /// 相手をブロックする
+  ///
+  /// 学生が団体をブロックした場合、以後その団体からスカウトは届かない
+  /// （利用規約 第8条2）。これはFirestoreルールが保証している。
+  Future<void> blockAccount({
+    required AccountRole as,
+    required String targetId,
+    required String targetName,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) throw Exception('ログインが必要です');
+    if (targetId == user.uid) throw Exception('自分自身はブロックできません。');
+
+    await _blocksRef(as, user.uid).doc(targetId).set({
+      'targetName': targetName,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// ブロックを解除する
+  Future<void> unblockAccount({
+    required AccountRole as,
+    required String targetId,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) throw Exception('ログインが必要です');
+    await _blocksRef(as, user.uid).doc(targetId).delete();
+  }
+
+  /// 特定の相手をブロック済みか確認する
+  Future<bool> isBlocked({
+    required AccountRole as,
+    required String targetId,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) return false;
+    final doc = await _blocksRef(as, user.uid).doc(targetId).get();
+    return doc.exists;
+  }
+
+  /// ブロックしたアカウントの一覧（ブロックした日時の新しい順）
+  Stream<List<BlockedAccount>> getBlockedAccounts(AccountRole as) {
+    final user = _auth.currentUser;
+    if (user == null) return Stream.value(const []);
+
+    // createdAt はサーバー側で確定するため、書き込み直後の一時的な null で
+    // 一覧から漏れないよう orderBy は使わずクライアント側で並べ替える
+    return _blocksRef(as, user.uid).snapshots().map((snapshot) {
+      final accounts = snapshot.docs
+          .map((doc) => BlockedAccount.fromFirestore(doc.data(), doc.id))
+          .toList();
+      accounts.sort((a, b) {
+        final aAt = a.blockedAt;
+        final bAt = b.blockedAt;
+        if (aAt == null) return -1;
+        if (bAt == null) return 1;
+        return bAt.compareTo(aAt);
+      });
+      return accounts;
+    });
+  }
+
+  /// ブロックした相手のIDの集合（一覧画面のフィルタリング用）
+  Stream<Set<String>> getBlockedIds(AccountRole as) {
+    final user = _auth.currentUser;
+    if (user == null) return Stream.value(const {});
+    return _blocksRef(as, user.uid)
+        .snapshots()
+        .map((snapshot) => snapshot.docs.map((doc) => doc.id).toSet());
   }
 
   // ─── アカウント削除（管理者用） ───

@@ -4,7 +4,9 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
+import '../models/account_role.dart';
 import '../models/scout.dart';
+import 'components/moderation_menu.dart';
 import 'group_detail_screen.dart';
 
 /// スカウト詳細画面
@@ -97,6 +99,21 @@ class _ScoutDetailScreenState extends State<ScoutDetailScreen> {
     }
   }
 
+  /// 通報時に運営へ共有するスカウトの内容（利用規約 第7条2）
+  ///
+  /// 本文は定型文から組み立てられるため、どの定型文をどの値で送ったかも残す。
+  Map<String, dynamic> _scoutSnapshot() {
+    final scout = widget.scout;
+    return {
+      'scoutId': scout.id,
+      'organizationName': scout.organizationName,
+      'body': scout.body,
+      if (scout.templateId != null) 'templateId': scout.templateId,
+      if (scout.templateArg != null) 'templateArg': scout.templateArg,
+      'sentAt': scout.sentAt.toIso8601String(),
+    };
+  }
+
   Future<void> _navigateToOrganization() async {
     setState(() {
       _isLoadingOrg = true;
@@ -136,7 +153,7 @@ class _ScoutDetailScreenState extends State<ScoutDetailScreen> {
   Widget build(BuildContext context) {
     final orgName = widget.scout.organizationName;
     final orgEmoji = widget.scout.organizationEmoji;
-    final message = widget.scout.message;
+    final message = widget.scout.body;
     final sentAt = widget.scout.sentAt;
 
     final timeString =
@@ -149,6 +166,16 @@ class _ScoutDetailScreenState extends State<ScoutDetailScreen> {
         backgroundColor: AppTheme.surface,
         elevation: 0,
         iconTheme: const IconThemeData(color: AppTheme.textPrimary),
+        actions: [
+          ModerationMenu(
+            viewerRole: AccountRole.student,
+            targetId: widget.scout.organizationId,
+            targetName: orgName,
+            contentSnapshot: _scoutSnapshot(),
+            // ブロックした団体のスカウトは一覧から消えるため、詳細も閉じる
+            onBlocked: () => Navigator.pop(context),
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),

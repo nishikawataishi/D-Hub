@@ -57,6 +57,17 @@ service cloud.firestore {
         allow read: if isAdmin();
         allow write: if false;
       }
+
+      // ── blocks サブコレクション（学生がブロックした団体） ──
+      // ドキュメントIDはブロックした団体のUID。本人だけが読み書きでき、
+      // ブロックされた側からは参照できない（利用規約 第8条3）。
+      // 運営は通報対応の調査のために読み取れる。
+      match /blocks/{blockedId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId) && blockedId != userId;
+        allow delete: if isOwner(userId);
+        allow update: if false;
+      }
     }
 
     match /organizations/{docId} {
@@ -86,6 +97,22 @@ service cloud.firestore {
       allow delete: if isAdmin() ||
                     isOwner(resource.data.representativeId) ||
                     isOwner(docId);
+
+      // ── blocks サブコレクション（団体がブロックした学生） ──
+      // ドキュメントIDはブロックした学生のUID。団体オーナーだけが読み書きでき、
+      // ブロックされた学生からは参照できない（利用規約 第8条3）。
+      match /blocks/{blockedId} {
+        function isOrgOwner() {
+          return isOwner(docId) ||
+            (isAuthenticated() &&
+             get(/databases/$(database)/documents/organizations/$(docId))
+               .data.representativeId == request.auth.uid);
+        }
+        allow read: if isOrgOwner() || isAdmin();
+        allow create: if isOrgOwner() && blockedId != docId;
+        allow delete: if isOrgOwner();
+        allow update: if false;
+      }
     }
 
     // ==========================================================
@@ -131,6 +158,67 @@ service cloud.firestore {
     // scouts コレクション
     // ==========================================================
     match /scouts/{docId} {
+      // ── 定型文スカウトの検証（自由記述の禁止） ──
+      // 団体は本文を自由に書けず、5種類の定型文から選ぶ。埋め込む値も
+      // 「対象学生が実際に登録している値」または「自団体が実際に公開している
+      // イベント」と一致していなければ保存できない。これにより自由記述は
+      // 運用ルールではなくシステム上の制約として排除される。
+
+      function scoutTarget() {
+        return get(/databases/$(database)/documents/users/$(request.resource.data.targetUserId)).data;
+      }
+
+      function pickedEvent() {
+        return get(/databases/$(database)/documents/events/$(request.resource.data.templateEventId)).data;
+      }
+
+      // 送信先の学生が送信元の団体をブロックしていないこと。
+      // 「ブロックした団体からはスカウトが届かない」（利用規約 第8条2）を
+      // クライアントの実装ではなくルールで保証する。
+      function isNotBlockedByTarget() {
+        return !exists(/databases/$(database)/documents/users/$(request.resource.data.targetUserId)/blocks/$(request.auth.uid));
+      }
+
+      function isValidScoutTemplate() {
+        let d = request.resource.data;
+        return d.templateId is int
+          && d.templateId >= 0
+          && d.templateId <= 4
+          // 想定外のフィールドを一切許可しない（旧形式の message もここで弾かれる）
+          && d.keys().hasOnly([
+              'targetUserId', 'organizationId', 'organizationName',
+              'organizationEmoji', 'organizationCategory',
+              'templateId', 'templateArg', 'templateEventId',
+              'isRead', 'readAt', 'sentAt',
+              'organizationInstagramUrl', 'organizationGroupLineUrl',
+              'organizationLogoUrl', 'targetUserIconUrl', 'targetUserName'
+             ])
+          && (
+            // 0: 興味タグに共感 → 対象学生が登録しているタグのみ
+            (d.templateId == 0
+              && d.templateArg is string
+              && d.templateArg in scoutTarget().get('interests', []))
+            // 1: イベントに招待 → 自団体のイベントで、タイトルが実物と一致すること
+            || (d.templateId == 1
+              && d.templateArg is string
+              && d.templateEventId is string
+              && exists(/databases/$(database)/documents/events/$(d.templateEventId))
+              && pickedEvent().organizationId == request.auth.uid
+              && pickedEvent().title == d.templateArg)
+            // 2: 同じキャンパス → 対象学生の登録キャンパスと一致
+            || (d.templateId == 2
+              && d.templateArg is string
+              && d.templateArg == scoutTarget().get('mainCampus', ''))
+            // 3: 学年を歓迎 → 対象学生の学年と一致
+            || (d.templateId == 3
+              && d.templateArg is string
+              && d.templateArg == string(scoutTarget().get('grade', 0)))
+            // 4: 見学のお誘い → 埋め込む値を持たない
+            || (d.templateId == 4
+              && !d.keys().hasAny(['templateArg', 'templateEventId']))
+          );
+      }
+
       // 読み取りはスカウト対象の学生、または送信元の団体のみ
       allow get: if isAuthenticated() &&
         (request.auth.uid == resource.data.targetUserId ||
@@ -146,12 +234,44 @@ service cloud.firestore {
                     && request.auth.uid == resource.data.targetUserId
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'readAt']);
 
-      // 作成は審査承認済みの団体のみ。メッセージは1〜500文字
+      // 作成は審査承認済みの団体のみ。本文は定型文に限定され、自由記述はできない
       allow create: if isVerifiedOrg()
                     && request.resource.data.organizationId == request.auth.uid
-                    && request.resource.data.message is string
-                    && request.resource.data.message.size() > 0
-                    && request.resource.data.message.size() <= 500;
+                    && isNotBlockedByTarget()
+                    && isValidScoutTemplate();
+    }
+
+    // ==========================================================
+    // reports コレクション（通報）
+    // ==========================================================
+    // 利用規約 第7条に基づく通報。通報内容と対象コンテンツのスナップショットは
+    // 運営のみが確認する（第7条2）。通報者が誰かは通報された相手に開示されない
+    // ため、read は管理者に限定し、通報者自身にも読ませない（第7条4）。
+    match /reports/{reportId} {
+      function isValidReport() {
+        let d = request.resource.data;
+        return d.keys().hasAll([
+                 'reporterId', 'reporterRole', 'targetType', 'targetId',
+                 'targetName', 'reason', 'detail', 'status'
+               ])
+          && d.keys().hasOnly([
+               'reporterId', 'reporterRole', 'targetType', 'targetId',
+               'targetName', 'reason', 'detail', 'snapshot', 'status', 'createdAt'
+             ])
+          && d.reporterId == request.auth.uid
+          // 自分自身は通報できない（自作自演で運営工数を消費させない）
+          && d.targetId != request.auth.uid
+          && d.reporterRole in ['student', 'organization']
+          && d.targetType in ['user', 'organization']
+          && d.reason in ['inappropriate_content', 'impersonation',
+                          'harassment', 'dating', 'spam', 'other']
+          && d.detail is string
+          && d.detail.size() <= 1000
+          && d.status == 'open';
+      }
+
+      allow create: if isAuthenticated() && isValidReport();
+      allow read, update, delete: if isAdmin();
     }
 
     // ==========================================================

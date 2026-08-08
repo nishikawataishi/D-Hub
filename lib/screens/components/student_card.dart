@@ -56,7 +56,7 @@ class StudentCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${student.faculty} ${student.grade}回生 • ${student.mainCampus.name}',
+                      '${student.faculty} ${student.grade}回生 • ${student.mainCampus.label}',
                       style: const TextStyle(
                         fontSize: 13,
                         color: AppTheme.textSecondary,
