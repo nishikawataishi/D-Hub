@@ -60,9 +60,40 @@ jobs:
         working-directory: firestore-tests
         run: npm ci
 
-      - name: ルールテスト実行
+      # Storage も起動する。storage.rules は firestore.rules と別ファイル・別評価で、
+      # 片方だけ検証しても もう片方の穴には気づけない（実際に削除まわりで事故済み）。
+      - name: ルールテスト実行（Firestore + Storage）
         working-directory: firestore-tests
-        run: firebase emulators:exec --only firestore --project demo-rules-test "node --test rules.test.mjs"
+        run: firebase emulators:exec --only firestore,storage --project demo-rules-test "node --test rules.test.mjs storage.rules.test.mjs"
+
+  # ── Cloud Functions の静的解析 ──
+  # 管理者権限で動くサーバコードなのに、これまでCIで一切検査されていなかった。
+  # lint スクリプトは Firebase テンプレート由来で元からあったが、設定ファイルが
+  # 無く実行するとエラーになる状態だった（2026-08-10に .eslintrc.json を追加）。
+  #
+  # ルールは eslint:recommended のみ。eslint-config-google も試したが体裁の指摘が
+  # 908件（大半が CRLF と空白）出るだけで、本番コードを全面書き換えする割に
+  # 不具合検知の利得が無い。recommended は現状のコードで0件なので、
+  # 「今後入る未定義変数・未使用変数・到達不能コード」を検知する門番として機能する。
+  functions-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      # rules-test と同じ理由で npm install ではなく npm ci（ロックファイル厳守）
+      - name: 依存関係の取得（ロックファイル厳守）
+        working-directory: functions
+        run: npm ci
+
+      - name: ESLint
+        working-directory: functions
+        run: npm run lint
 
   # ── セキュリティチェック ──
   security:
