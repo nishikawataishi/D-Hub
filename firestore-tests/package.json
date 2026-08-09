@@ -1,10 +1,10 @@
 {
   "name": "firestore-rules-tests",
   "private": true,
-  "description": "firestore.rules の単体テスト（Firestoreエミュレータで実行）",
+  "description": "firestore.rules / storage.rules の単体テスト（エミュレータで実行）",
   "type": "module",
   "scripts": {
-    "test": "firebase emulators:exec --only firestore \"node --test rules.test.mjs\""
+    "test": "firebase emulators:exec --only firestore,storage \"node --test rules.test.mjs storage.rules.test.mjs\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "5.0.0",
