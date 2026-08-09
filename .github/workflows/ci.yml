@@ -64,6 +64,64 @@ jobs:
         working-directory: firestore-tests
         run: firebase emulators:exec --only firestore --project demo-rules-test "node --test rules.test.mjs"
 
+  # ── セキュリティチェック ──
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 秘密ファイルは gitignore し、CI で Secret から復元する運用。
+      # public リポジトリなので 1 回でもコミットすれば即座に露出し、履歴にも残る。
+      # GitHub の secret scanning は「認証情報らしい文字列」しか見ず、設定ファイルや
+      # 署名鍵の混入は検知できない（汎用パターン検出は Advanced Security が必要）。
+      # そこはカバーされないので、ここで追跡状態を直接見て塞ぐ。
+      - name: 秘密ファイルの混入検査
+        run: |
+          FAILED=0
+          for f in lib/firebase_options.dart \
+                   android/app/google-services.json \
+                   android/key.properties \
+                   ios/Runner/GoogleService-Info.plist; do
+            if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+              echo "::error file=$f::$f が Git に追跡されています（gitignore 対象のはず）"
+              FAILED=1
+            fi
+          done
+          if git ls-files | grep -iE '\.(jks|keystore|p12|mobileprovision|pem)$'; then
+            echo "::error::署名鍵・証明書らしきファイルが追跡されています"
+            FAILED=1
+          fi
+          if [ "$FAILED" -ne 0 ]; then
+            exit 1
+          fi
+          echo "秘密ファイルの混入なし"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # package-lock.json だけで監査できるので node_modules は入れない。
+      #
+      # ブロックするのは critical のみ。現状 functions には high 1件 + moderate 11件
+      # あるが、いずれも firebase-admin / firebase-functions の推移的依存で、解消には
+      # 破壊的変更（firebase-admin 14 系）が要る。high で止めると初回から常時赤になり、
+      # 赤が常態化すると誰も見なくなる。段階的な解消は Dependabot に任せ、
+      # ここでは即対応が要る critical だけを止める。
+      - name: npm audit（functions・critical でブロック）
+        working-directory: functions
+        run: npm audit --audit-level=critical
+
+      # ブロックしない分、内訳は毎回サマリへ出して見える状態にしておく。
+      - name: 脆弱性の内訳をサマリへ出力
+        if: always()
+        working-directory: functions
+        run: |
+          SUMMARY="$(npm audit 2>&1 | grep -E 'vulnerabilit' | tail -1 || true)"
+          {
+            echo "### functions の脆弱性"
+            echo "${SUMMARY:-検出なし}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # ── Web ビルド（本番 Hosting に配信されるのはこれ） ──
   # Hosting ターゲット app の公開ディレクトリが build/web なので、
   # 本番に出る成果物は実質これ。ここで作った artifact をそのまま deploy すれば、
