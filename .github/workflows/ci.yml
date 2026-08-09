@@ -64,6 +64,51 @@ jobs:
         working-directory: firestore-tests
         run: firebase emulators:exec --only firestore --project demo-rules-test "node --test rules.test.mjs"
 
+  # ── Web ビルド（本番 Hosting に配信されるのはこれ） ──
+  # Hosting ターゲット app の公開ディレクトリが build/web なので、
+  # 本番に出る成果物は実質これ。ここで作った artifact をそのまま deploy すれば、
+  # ローカル環境（日本語パス + OneDrive）の差異が本番に混入しない。
+  build-web:
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.41.2"
+          cache: true
+
+      # firebase_options.dart は gitignore 対象のため Secret から復元
+      - name: firebase_options.dart を復元
+        env:
+          FIREBASE_OPTIONS_DART: ${{ secrets.FIREBASE_OPTIONS_DART }}
+        run: echo "$FIREBASE_OPTIONS_DART" | base64 -d > lib/firebase_options.dart
+
+      - name: 依存関係の取得
+        run: flutter pub get
+
+      - name: Web ビルド
+        run: flutter build web --release
+
+      # ビルド済み main.dart.js から世代を判別する手段が無い（Dartのwebビルドは
+      # 日本語文字列を原形で持たないため grep が効かない）。どのコミットの成果物かは
+      # ここに残す情報だけが頼りになるので、必ずサマリへ出しておく。
+      - name: ビルド情報をサマリへ出力
+        if: always()
+        run: |
+          echo "### Web ビルド情報" >> "$GITHUB_STEP_SUMMARY"
+          echo "- バージョン名: $(grep '^version:' pubspec.yaml | sed 's/version: *//' | cut -d+ -f1)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- コミット: ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: build/web をアップロード
+        uses: actions/upload-artifact@v4
+        with:
+          name: d-hub-web
+          path: build/web
+          retention-days: 14
+
   # ── Android APK ビルド ──
   build-android:
     needs: [test]
