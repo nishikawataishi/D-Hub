@@ -11,7 +11,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: subosito/flutter-action@v2
         with:
@@ -38,7 +38,7 @@ jobs:
   rules-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -78,7 +78,7 @@ jobs:
   functions-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -99,7 +99,7 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # 秘密ファイルは gitignore し、CI で Secret から復元する運用。
       # public リポジトリなので 1 回でもコミットすれば即座に露出し、履歴にも残る。
@@ -161,7 +161,7 @@ jobs:
     needs: [test]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: subosito/flutter-action@v2
         with:
@@ -203,7 +203,7 @@ jobs:
     needs: [test]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-java@v4
         with:
@@ -270,7 +270,7 @@ jobs:
     needs: [test]
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: subosito/flutter-action@v2
         with:
