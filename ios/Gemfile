@@ -1,0 +1,14 @@
+# fastlane の実行環境。
+#
+# CocoaPods はここに入れない。GitHub Actions の macOS ランナーにプリインストール
+# されているものを Flutter がそのまま使う構成が既に動いており（ci.yml の build-ios）、
+# bundler 配下に別バージョンを持ち込むと Flutter 側の pod install と食い違う。
+#
+# Gemfile.lock は生成されたらコミットすること。理由は .gitignore の
+# package-lock.json に関するコメントと同じで、依存バージョンの固定が
+# サプライチェーン攻撃への基本的な防御になるため。
+# 初回の release-ios ワークフロー実行後、artifact から取得できる。
+
+source "https://rubygems.org"
+
+gem "fastlane"

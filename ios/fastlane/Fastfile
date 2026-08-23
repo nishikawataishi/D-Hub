@@ -1,0 +1,387 @@
+# D-Hub iOS リリース用 fastlane 設定
+#
+# ── 方針 ──
+# 1. 署名は「手動(manual)」固定。CI 上で Apple にインタラクティブログインしないため、
+#    配布証明書(.p12)とプロビジョニングプロファイル(.mobileprovision)を
+#    Secret から復元して使う。自動署名だと Xcode がその場で証明書を発行しようとし、
+#    CI では認証できずに落ちる。
+# 2. App Store Connect との通信は App Store Connect API キー(.p8)。
+#    Apple ID + アプリ固有パスワードだと 2FA と有効期限で定期的に壊れる。
+# 3. Flutter のビルド自体は CI 側の `flutter build ios --release --no-codesign` が
+#    先に済ませている（ci.yml の build-ios で実績のある手順をそのまま使う）。
+#    ここでは署名・アーカイブ・エクスポート・アップロードだけを担当する。
+#
+# ── レーン ──
+#   fastlane ios preflight … 秘密情報と証明書の整合性チェックのみ。ビルドしない。
+#   fastlane ios register_app … App Store Connect にアプリレコードを作る（初回1回だけ）
+#   fastlane ios beta      … アーカイブ → 署名 → TestFlight へアップロード
+#
+# ── 必要な環境変数 ──
+#   APPLE_TEAM_ID                    Team ID（10文字英数字）
+#   ASC_KEY_ID                       App Store Connect API キーの Key ID
+#   ASC_ISSUER_ID                    同 Issuer ID（UUID）
+#   ASC_KEY_P8_BASE64                同 .p8 ファイルを base64 化したもの
+#   IOS_DIST_CERT_P12_BASE64         配布証明書 .p12 を base64 化したもの
+#   IOS_DIST_CERT_PASSWORD           その .p12 のパスワード
+#   IOS_PROVISIONING_PROFILE_BASE64  .mobileprovision を base64 化したもの
+#   TESTFLIGHT_CHANGELOG             （任意）TestFlight の「テスト内容」
+
+require "fileutils"
+require "securerandom"
+require "open3"
+require "time"
+
+default_platform(:ios)
+
+APP_IDENTIFIER = "com.dhublink.app"
+WORKSPACE      = "Runner.xcworkspace"
+SCHEME         = "Runner"
+CONFIGURATION  = "Release"
+
+# __dir__ は <repo>/ios/fastlane なので、その親が <repo>/ios
+IOS_DIR         = File.expand_path("..", __dir__)
+EXPORT_TEMPLATE = File.join(IOS_DIR, "ExportOptions.plist")
+WORK_DIR        = File.join(IOS_DIR, "build", "signing") # .gitignore 済み
+
+# ──────────────────────────── ヘルパー ────────────────────────────
+
+# 環境変数を必須として取得する。未設定なら何が足りないかを明示して止める。
+def required_env!(name)
+  value = ENV[name].to_s.strip
+  if value.empty?
+    UI.user_error!("環境変数 #{name} が未設定。GitHub Secrets に登録されているか確認しろ。")
+  end
+  value
+end
+
+# コマンドを実行して標準出力を返す。失敗したら止める。
+def run!(*cmd, allow_failure: false)
+  stdout, stderr, status = Open3.capture3(*cmd)
+  unless status.success?
+    return nil if allow_failure
+    UI.user_error!("コマンド失敗: #{cmd.join(' ')}\n#{stderr}")
+  end
+  stdout
+end
+
+# base64 の環境変数をファイルに復元する。
+# 復元後、中身が期待した形式かを検証する。base64 として正しくても
+# 「別のファイルを間違えて登録した」事故はこれでしか捕まえられない。
+def restore_secret_file!(env_name, dest, expect:)
+  FileUtils.mkdir_p(File.dirname(dest))
+  raw = required_env!(env_name)
+
+  # 改行やスペース混じりで貼り付けられていても通す（"m" は寛容なデコード）
+  decoded = raw.unpack1("m")
+  if decoded.nil? || decoded.empty?
+    UI.user_error!("#{env_name} を base64 デコードしたら空だった。値の登録ミスを疑え。")
+  end
+
+  case expect
+  when :pkcs12
+    # PKCS#12 は DER。必ず SEQUENCE タグ 0x30 で始まる。
+    unless decoded.bytes.first == 0x30
+      UI.user_error!("#{env_name} は .p12 に見えない（先頭バイトが 0x30 でない）。" \
+                     ".cer や .pem を間違えて登録していないか確認しろ。")
+    end
+  when :mobileprovision
+    unless decoded.include?("<plist")
+      UI.user_error!("#{env_name} は .mobileprovision に見えない（plist が埋め込まれていない）。")
+    end
+  end
+
+  File.binwrite(dest, decoded)
+  dest
+end
+
+# .mobileprovision（CMS 署名された plist）から情報を取り出す。
+# プロファイル名を人間が Secret に手入力する運用は誤字で必ず事故るので、
+# 実ファイルから機械的に読む。
+def profile_info!(profile_path)
+  plist = File.join(WORK_DIR, "profile.plist")
+  xml = run!("security", "cms", "-D", "-i", profile_path)
+  File.write(plist, xml)
+
+  read = lambda do |key|
+    out = run!("/usr/libexec/PlistBuddy", "-c", "Print :#{key}", plist, allow_failure: true)
+    out&.strip
+  end
+
+  {
+    name:        read.call("Name"),
+    uuid:        read.call("UUID"),
+    team_id:     read.call("TeamIdentifier:0"),
+    app_id:      read.call("Entitlements:application-identifier"),
+    expires_raw: read.call("ExpirationDate"),
+    # App Store 配布用プロファイルには ProvisionedDevices が存在しない。
+    # 存在する＝Development か Ad Hoc であり、TestFlight には出せない。
+    provisioned_devices: read.call("ProvisionedDevices"),
+    get_task_allow: read.call("Entitlements:get-task-allow"),
+  }
+end
+
+# ExportOptions.plist のテンプレートを実値で解決したコピーを作る。
+def render_export_options!(team_id:, profile_name:)
+  unless File.exist?(EXPORT_TEMPLATE)
+    UI.user_error!("#{EXPORT_TEMPLATE} が無い。リポジトリの構成を確認しろ。")
+  end
+
+  rendered = File.read(EXPORT_TEMPLATE)
+                 .gsub("__TEAM_ID__", team_id)
+                 .gsub("__PROFILE_NAME__", profile_name)
+
+  if rendered.include?("__TEAM_ID__") || rendered.include?("__PROFILE_NAME__")
+    UI.user_error!("ExportOptions.plist のプレースホルダを解決しきれなかった。")
+  end
+
+  FileUtils.mkdir_p(WORK_DIR)
+  out = File.join(WORK_DIR, "ExportOptions.resolved.plist")
+  File.write(out, rendered)
+  out
+end
+
+# 証明書とプロファイルの整合性を検証する。
+# ここで落とすほうが、xcodebuild の不親切なエラーを読むより遥かに速い。
+def verify_profile!(info, team_id)
+  UI.message("プロファイル名   : #{info[:name]}")
+  UI.message("UUID             : #{info[:uuid]}")
+  UI.message("Team ID          : #{info[:team_id]}")
+  UI.message("Application ID   : #{info[:app_id]}")
+  UI.message("有効期限         : #{info[:expires_raw]}")
+
+  if info[:name].to_s.empty?
+    UI.user_error!("プロファイルから Name を読めなかった。ファイルが壊れている可能性がある。")
+  end
+
+  expected_app_id = "#{team_id}.#{APP_IDENTIFIER}"
+  if info[:app_id] != expected_app_id
+    UI.user_error!("プロファイルの Application ID が一致しない。\n" \
+                   "  期待: #{expected_app_id}\n  実際: #{info[:app_id]}\n" \
+                   "APPLE_TEAM_ID が違うか、別の Bundle ID のプロファイルを登録している。")
+  end
+
+  if info[:team_id] != team_id
+    UI.user_error!("プロファイルの Team ID (#{info[:team_id]}) と " \
+                   "APPLE_TEAM_ID (#{team_id}) が食い違っている。")
+  end
+
+  unless info[:provisioned_devices].nil?
+    UI.user_error!("これは Development / Ad Hoc プロファイルだ（端末が登録されている）。" \
+                   "App Store 配布用のプロファイルを作り直せ。")
+  end
+
+  if info[:get_task_allow] == "true"
+    UI.user_error!("get-task-allow が true。Development プロファイルの可能性が高い。")
+  end
+
+  begin
+    expires = Time.parse(info[:expires_raw].to_s)
+    days = ((expires - Time.now) / 86_400).floor
+    if days.negative?
+      UI.user_error!("プロファイルは #{-days} 日前に失効している。作り直せ。")
+    elsif days < 30
+      UI.important("プロファイルの残り有効期間が #{days} 日。近いうちに更新が必要。")
+    else
+      UI.success("プロファイル有効（残り #{days} 日）")
+    end
+  rescue ArgumentError
+    UI.important("有効期限を解釈できなかった: #{info[:expires_raw]}（チェックはスキップ）")
+  end
+end
+
+# ──────────────────────────── レーン ────────────────────────────
+
+platform :ios do
+  # 証明書とプロファイルを一時キーチェーンに入れ、検証済みの情報を返す。
+  private_lane :setup_signing do |options|
+    team_id = options[:team_id]
+    FileUtils.mkdir_p(WORK_DIR)
+
+    cert_path = restore_secret_file!(
+      "IOS_DIST_CERT_P12_BASE64",
+      File.join(WORK_DIR, "distribution.p12"),
+      expect: :pkcs12
+    )
+    profile_path = restore_secret_file!(
+      "IOS_PROVISIONING_PROFILE_BASE64",
+      File.join(WORK_DIR, "profile.mobileprovision"),
+      expect: :mobileprovision
+    )
+
+    # ログイン用キーチェーンを汚さないよう、この実行専用のキーチェーンを作る。
+    # CI ランナーは使い捨てなので後始末は不要だが、ローカル実行に備えて
+    # 名前は固定し、既存があれば作り直す。
+    keychain_name = "dhub-ci.keychain-db"
+    keychain_password = SecureRandom.hex(24)
+
+    # security コマンドがキーチェーンのファイル名に -db を付けるかどうかは
+    # 名前の与え方で変わるため、File.exist? での存在判定は当てにならない。
+    # 消せたら消す、無ければ無視する、という形にしておく。
+    begin
+      delete_keychain(name: keychain_name)
+    rescue StandardError
+      # CI ランナーは使い捨てなので通常はこちら（存在しない）
+    end
+
+    create_keychain(
+      name: keychain_name,
+      password: keychain_password,
+      default_keychain: false,
+      unlock: true,
+      timeout: 3600,       # 1時間。0（無期限）にはしない。
+      lock_when_sleeps: false,
+      add_to_search_list: true
+    )
+
+    import_certificate(
+      certificate_path: cert_path,
+      certificate_password: required_env!("IOS_DIST_CERT_PASSWORD"),
+      keychain_name: keychain_name,
+      keychain_password: keychain_password
+    )
+
+    install_provisioning_profile(path: profile_path)
+
+    info = profile_info!(profile_path)
+    verify_profile!(info, team_id)
+
+    info.merge(keychain_name: keychain_name, keychain_password: keychain_password)
+  end
+
+  desc "秘密情報・証明書・プロファイルの整合性だけ確認する（ビルドもアップロードもしない）"
+  lane :preflight do
+    team_id = required_env!("APPLE_TEAM_ID")
+
+    unless team_id.match?(/\A[A-Z0-9]{10}\z/)
+      UI.important("APPLE_TEAM_ID が通常の形式（英大文字・数字10桁）ではない: #{team_id}")
+    end
+
+    # .p8 の形だけ先に確認しておく（API 通信より前に落としたい）
+    p8 = required_env!("ASC_KEY_P8_BASE64").unpack1("m").to_s
+    unless p8.include?("BEGIN PRIVATE KEY")
+      UI.user_error!("ASC_KEY_P8_BASE64 が .p8 に見えない。" \
+                     "AuthKey_XXXXXX.p8 をそのまま base64 化したか確認しろ。")
+    end
+    unless required_env!("ASC_ISSUER_ID").match?(/\A[0-9a-f-]{36}\z/i)
+      UI.important("ASC_ISSUER_ID が UUID 形式ではない。Key ID と取り違えていないか確認しろ。")
+    end
+    UI.success("App Store Connect API キーの形式 OK")
+
+    setup_signing(team_id: team_id)
+
+    # ここまで通れば署名資材は揃っている。API 疎通も確認する。
+    api_key = app_store_connect_api_key(
+      key_id: required_env!("ASC_KEY_ID"),
+      issuer_id: required_env!("ASC_ISSUER_ID"),
+      key_content: required_env!("ASC_KEY_P8_BASE64"),
+      is_key_content_base64: true,
+      in_house: false
+    )
+
+    begin
+      latest = latest_testflight_build_number(
+        api_key: api_key,
+        app_identifier: APP_IDENTIFIER,
+        initial_build_number: 0
+      )
+      UI.success("App Store Connect 疎通 OK。TestFlight 上の最新ビルド番号: #{latest}")
+    rescue StandardError => e
+      UI.important("App Store Connect への問い合わせが失敗した: #{e.message}")
+      UI.important("アプリレコード未作成ならこれは正常。`fastlane ios register_app` を先に実行しろ。")
+    end
+
+    UI.success("preflight 完了。beta レーンを実行できる状態だ。")
+  end
+
+  desc "App Store Connect にアプリレコードを作成する（初回1回だけ）"
+  lane :register_app do
+    api_key = app_store_connect_api_key(
+      key_id: required_env!("ASC_KEY_ID"),
+      issuer_id: required_env!("ASC_ISSUER_ID"),
+      key_content: required_env!("ASC_KEY_P8_BASE64"),
+      is_key_content_base64: true,
+      in_house: false
+    )
+
+    # App 名は App Store 全体で一意。既に使われていると失敗する。
+    # SKU は社内管理用の識別子で、公開されない。
+    produce(
+      api_key: api_key,
+      app_identifier: APP_IDENTIFIER,
+      app_name: "D-Hub",
+      language: "Japanese",
+      sku: "dhub-ios-001",
+      team_id: required_env!("APPLE_TEAM_ID"),
+      skip_itc: false,
+      skip_devcenter: false
+    )
+  end
+
+  desc "アーカイブ → 署名 → TestFlight へアップロード"
+  lane :beta do |options|
+    team_id = required_env!("APPLE_TEAM_ID")
+    info = setup_signing(team_id: team_id)
+
+    api_key = app_store_connect_api_key(
+      key_id: required_env!("ASC_KEY_ID"),
+      issuer_id: required_env!("ASC_ISSUER_ID"),
+      key_content: required_env!("ASC_KEY_P8_BASE64"),
+      is_key_content_base64: true,
+      in_house: false
+    )
+
+    # project.pbxproj の署名設定を手動署名に上書きする。
+    # このワークツリー上だけの変更で、コミットはしない（CI は使い捨て）。
+    update_code_signing_settings(
+      path: "Runner.xcodeproj",
+      use_automatic_signing: false,
+      team_id: team_id,
+      targets: ["Runner"],
+      build_configurations: [CONFIGURATION],
+      code_sign_identity: "Apple Distribution",
+      profile_name: info[:name],
+      bundle_identifier: APP_IDENTIFIER
+    )
+
+    export_options = render_export_options!(team_id: team_id, profile_name: info[:name])
+
+    build_app(
+      workspace: WORKSPACE,
+      scheme: SCHEME,
+      configuration: CONFIGURATION,
+      export_options_plist: export_options,
+      output_directory: "build/ipa",
+      output_name: "D-Hub.ipa",
+      # Flutter 側で既にビルド済みの成果物を活かすため clean しない
+      clean: false
+      # xcargs で -allowProvisioningUpdates は渡さない。
+      # あれは「Xcode に証明書やプロファイルを自動発行させる」フラグで、
+      # 否定形（NO を付けるなど）は存在しない。手動署名では単に渡さないのが正解。
+    )
+
+    ipa = lane_context[SharedValues::IPA_OUTPUT_PATH]
+    UI.success("IPA 生成: #{ipa}")
+
+    # 「テスト内容」を設定するには処理完了を待つ必要がある。
+    # 待つと CI が10〜30分伸びるので、既定では待たずに投げっぱなしにする。
+    wait = options[:wait].to_s == "true"
+    changelog = ENV["TESTFLIGHT_CHANGELOG"].to_s.strip
+
+    upload_options = {
+      api_key: api_key,
+      app_identifier: APP_IDENTIFIER,
+      ipa: ipa,
+      skip_waiting_for_build_processing: !wait,
+      # 外部テスター配布は審査(Beta App Review)が必要。まずは内部テスターのみ。
+      distribute_external: false,
+    }
+    # changelog は「処理完了を待つ」場合しか設定できない。
+    # nil を明示的に渡すと fastlane の設定検証に引っかかるので、キー自体を足さない。
+    upload_options[:changelog] = changelog if wait && !changelog.empty?
+
+    upload_to_testflight(upload_options)
+
+    UI.success("TestFlight へのアップロード完了。")
+    UI.message("処理完了まで数分〜十数分かかる。App Store Connect の TestFlight タブで確認しろ。")
+  end
+end

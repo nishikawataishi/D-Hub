@@ -1,0 +1,10 @@
+# fastlane のアプリ識別情報。
+#
+# apple_id（Apple ID のメールアドレス）は「書かない」。
+# App Store Connect への通信はすべて API キー(.p8)で行うため不要で、
+# 書くと 2FA プロンプトで CI が固まる経路を復活させてしまう。
+
+app_identifier("com.dhublink.app")
+
+# Team ID はコミットしない。GitHub Secrets の APPLE_TEAM_ID から渡す。
+team_id(ENV["APPLE_TEAM_ID"])

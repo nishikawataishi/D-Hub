@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  App Store 提出用の xcodebuild -exportArchive 設定（テンプレート）。
+
+  __TEAM_ID__ と __PROFILE_NAME__ はプレースホルダで、このファイルを直接
+  xcodebuild に渡しても動かない。fastlane が実行時に
+  ios/build/signing/ExportOptions.resolved.plist を生成して差し替える
+  （Fastfile の render_export_options! を参照）。
+
+  「テンプレートを1つだけ置いて実行時に解決する」形にしてあるのは、
+  Team ID を書いた plist をコミットしないため、かつ設定の正が2箇所に
+  分裂しないようにするため。プレースホルダのまま export すると
+  「__TEAM_ID__ なんてチームは無い」と即座に落ちるので、
+  中途半端に間違った状態で通ってしまう事故が起きない。
+-->
+<plist version="1.0">
+<dict>
+	<!-- Xcode 15.3 以降の名称。もし xcodebuild が値を認識せずに落ちたら
+	     "app-store"（旧名）に変える。 -->
+	<key>method</key>
+	<string>app-store-connect</string>
+
+	<key>teamID</key>
+	<string>__TEAM_ID__</string>
+
+	<!-- CI 上で Apple にログインしないため、署名は手動固定。
+	     自動署名だと Xcode がその場で証明書を作ろうとして CI で詰まる。 -->
+	<key>signingStyle</key>
+	<string>manual</string>
+
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>com.dhublink.app</key>
+		<string>__PROFILE_NAME__</string>
+	</dict>
+
+	<!-- クラッシュログをシンボル化するため dSYM を App Store Connect に送る -->
+	<key>uploadSymbols</key>
+	<true/>
+
+	<!-- false 必須。true だと Xcode が CFBundleVersion を勝手に書き換え、
+	     pubspec.yaml や flutter build の build-number 指定と食い違う。
+	     App Store Connect はビルド番号の重複を拒否するので、
+	     ここが原因のアップロード失敗は追跡しづらい。
+	     （XML コメント内にハイフン2連は書けないため、オプション名の
+	       先頭のハイフンは省いてある） -->
+	<key>manageAppVersionAndBuildNumber</key>
+	<false/>
+
+	<key>destination</key>
+	<string>export</string>
+
+	<key>stripSwiftSymbols</key>
+	<true/>
+</dict>
+</plist>

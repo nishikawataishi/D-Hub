@@ -1,0 +1,218 @@
+name: iOS Release (TestFlight)
+
+# 手動実行のみ。push では絶対に走らせない。
+# TestFlight へのアップロードは外向きの操作であり、ビルド番号を消費する。
+# 意図せず走ると番号だけが飛んで追跡しづらくなるため、毎回人間が起動する。
+on:
+  workflow_dispatch:
+    inputs:
+      preflight_only:
+        description: "Secrets と証明書の検証だけ行う（ビルド・アップロードなし）"
+        type: boolean
+        default: true
+      build_number:
+        description: "ビルド番号（空ならこのワークフローの実行回数を使う）"
+        type: string
+        default: ""
+      changelog:
+        description: "TestFlight の「テスト内容」（wait_for_processing が true のときだけ反映）"
+        type: string
+        default: ""
+      wait_for_processing:
+        description: "Apple 側の処理完了まで待つ（10〜30分伸びる）"
+        type: boolean
+        default: false
+
+# 同時実行を禁止する。並走するとビルド番号が衝突する。
+concurrency:
+  group: ios-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+      IOS_DIST_CERT_P12_BASE64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+      IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+      IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+      FIREBASE_OPTIONS_DART: ${{ secrets.FIREBASE_OPTIONS_DART }}
+      GOOGLESERVICE_INFO_PLIST: ${{ secrets.GOOGLESERVICE_INFO_PLIST }}
+      TESTFLIGHT_CHANGELOG: ${{ inputs.changelog }}
+      # CI で対話プロンプトを出させない
+      FASTLANE_SKIP_UPDATE_CHECK: "1"
+      FASTLANE_DISABLE_COLORS: "0"
+      LC_ALL: en_US.UTF-8
+      LANG: en_US.UTF-8
+
+    steps:
+      # Secrets の抜けは最初に落とす。ビルドを20分回してから
+      # 「Secret が無い」で落ちるのが一番もったいない。
+      - name: 必要な Secrets が揃っているか確認
+        run: |
+          missing=()
+          for v in APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8_BASE64 \
+                   IOS_DIST_CERT_P12_BASE64 IOS_DIST_CERT_PASSWORD \
+                   IOS_PROVISIONING_PROFILE_BASE64 \
+                   FIREBASE_OPTIONS_DART GOOGLESERVICE_INFO_PLIST; do
+            if [ -z "${!v}" ]; then missing+=("$v"); fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::次の Secret が未登録: ${missing[*]}"
+            echo "Settings → Secrets and variables → Actions で登録しろ。" >&2
+            echo "取得手順は docs/store/03_ios_release_runbook.md を参照。" >&2
+            exit 1
+          fi
+          echo "Secrets 9件すべて登録済み"
+
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.41.2"
+          cache: true
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      # Gemfile.lock をコミットするまではキャッシュを使わない
+      # （setup-ruby の bundler-cache はロックファイル前提のため）。
+      - name: fastlane を導入
+        working-directory: ios
+        run: |
+          bundle config set --local path vendor/bundle
+          bundle install --jobs 4
+          bundle exec fastlane --version
+
+      # firebase_options.dart / GoogleService-Info.plist は gitignore 対象。
+      # plist は Runner ターゲットの Copy Bundle Resources に登録済みなので、
+      # 復元しないと「ファイルが無い」でビルドが失敗する（ci.yml と同じ理由）。
+      - name: Firebase設定ファイルを復元
+        run: |
+          echo "$FIREBASE_OPTIONS_DART" | base64 -d > lib/firebase_options.dart
+          echo "$GOOGLESERVICE_INFO_PLIST" | base64 -d > ios/Runner/GoogleService-Info.plist
+          test -s lib/firebase_options.dart || { echo "::error::firebase_options.dart が空"; exit 1; }
+          test -s ios/Runner/GoogleService-Info.plist || { echo "::error::GoogleService-Info.plist が空"; exit 1; }
+
+      - name: 依存関係の取得
+        run: flutter pub get
+
+      - name: ビルド番号を決定
+        id: bn
+        # 自由入力の値を run: に直接展開するとシェルインジェクションになる。
+        # 必ず env 経由で渡し、シェル変数として受ける。
+        env:
+          INPUT_BUILD_NUMBER: ${{ inputs.build_number }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          BN="$INPUT_BUILD_NUMBER"
+          if [ -z "$BN" ]; then BN="$RUN_NUMBER"; fi
+          case "$BN" in
+            ''|*[!0-9]*) echo "::error::ビルド番号が整数でない: '$BN'"; exit 1 ;;
+          esac
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: *//' | cut -d+ -f1)
+          echo "build_number=$BN" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "バージョン $VERSION / ビルド番号 $BN でリリースする"
+
+      # 証明書・プロファイル・API キーの整合性を先に検証する。
+      # ここで落ちればビルド時間を一切消費しない。
+      - name: preflight（署名資材と API キーの検証）
+        working-directory: ios
+        run: bundle exec fastlane ios preflight
+
+      - name: preflight のみで終了
+        if: ${{ inputs.preflight_only }}
+        run: |
+          {
+            echo "### preflight のみ実行"
+            echo ""
+            echo "署名資材と App Store Connect API キーの検証に成功した。"
+            echo "実際にアップロードするには \`preflight_only\` を false にして再実行しろ。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ここから先はアップロードまで進む
+      - name: iOS ビルド（署名なし）
+        if: ${{ !inputs.preflight_only }}
+        run: |
+          flutter build ios --release --no-codesign \
+            --build-number=${{ steps.bn.outputs.build_number }}
+
+      # Flutter が Generated.xcconfig 経由で渡したビルド番号が
+      # 実際に Info.plist に反映されているかを確認する。
+      # ここがずれると App Store Connect が重複として弾き、原因が非常に追いにくい。
+      - name: ビルド番号が反映されているか検証
+        if: ${{ !inputs.preflight_only }}
+        run: |
+          PLIST="build/ios/iphoneos/Runner.app/Info.plist"
+          test -f "$PLIST" || { echo "::error::$PLIST が無い"; exit 1; }
+          ACTUAL=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST")
+          EXPECTED="${{ steps.bn.outputs.build_number }}"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::ビルド番号が一致しない（期待:$EXPECTED 実際:$ACTUAL）"
+            exit 1
+          fi
+          echo "CFBundleVersion = $ACTUAL（一致）"
+
+      - name: アーカイブして TestFlight へアップロード
+        if: ${{ !inputs.preflight_only }}
+        working-directory: ios
+        run: |
+          bundle exec fastlane ios beta wait:${{ inputs.wait_for_processing }}
+
+      - name: リリース情報をサマリへ出力
+        if: ${{ !inputs.preflight_only && success() }}
+        run: |
+          {
+            echo "### TestFlight アップロード完了"
+            echo ""
+            echo "| 項目 | 値 |"
+            echo "|---|---|"
+            echo "| バージョン | ${{ steps.bn.outputs.version }} |"
+            echo "| ビルド番号 | ${{ steps.bn.outputs.build_number }} |"
+            echo "| コミット | ${{ github.sha }} |"
+            echo "| ブランチ | ${{ github.ref_name }} |"
+            echo ""
+            echo "App Store Connect の TestFlight タブで処理状況を確認しろ。"
+            echo "処理完了まで数分〜十数分かかる。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # 初回実行後、この artifact から Gemfile.lock を取ってコミットすること。
+      # fastlane の依存バージョンが固定され、以後のビルドが再現可能になる。
+      - name: Gemfile.lock を保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-gemfile-lock
+          path: ios/Gemfile.lock
+          retention-days: 30
+          if-no-files-found: warn
+
+      # クラッシュログのシンボル化に使う。App Store Connect にも送っているが
+      # 手元にも残しておく。
+      - name: dSYM を保存
+        if: ${{ !inputs.preflight_only && success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-dsyms-${{ steps.bn.outputs.build_number }}
+          path: ios/build/ipa/*.dSYM.zip
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: 失敗時に fastlane のログを保存
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fastlane-logs
+          path: |
+            ios/fastlane/report.xml
+            ~/Library/Logs/gym/
+          retention-days: 14
+          if-no-files-found: ignore

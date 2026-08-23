@@ -53,6 +53,28 @@ macos/Runner/GoogleService-Info.plist
 # Env vars
 .env
 
+# iOS 署名資材（絶対にコミットしない）
+# 秘密鍵・証明書・プロビジョニングプロファイル・App Store Connect API キー。
+# これらは GitHub Secrets にだけ置く。ローカルの実体は ios/certs/ に集約する。
+ios/certs/
+*.p12
+*.p8
+*.cer
+*.pem
+*.certSigningRequest
+*.mobileprovision
+
+# fastlane / iOS ビルド生成物
+# ios/Gemfile.lock は「コミットする」。package-lock.json と同じ理由で
+# fastlane とその依存のバージョンを固定するため、ignore しない。
+ios/build/
+ios/vendor/
+ios/.bundle/
+ios/fastlane/report.xml
+ios/fastlane/Preview.html
+ios/fastlane/test_output/
+ios/fastlane/README.md
+
 # Analysis and logs
 analyze*.txt
 deploy_res.txt
