@@ -225,7 +225,7 @@ Actions → **iOS Release (TestFlight)** → Run workflow
 | `The provided entity includes an attribute with a value that has already been used` | ビルド番号の重複。`build_number` を手入力して大きい値にする |
 | `Redundant Binary Upload` | 同上 |
 | `Invalid Provisioning Profile ... doesn't include the get-task-allow entitlement` | Development プロファイルを使っている。App Store 用を作り直せ |
-| `xcodebuild` が `method` の値でエラー | `ios/ExportOptions.plist` の `app-store-connect` を旧名 `app-store` に変える |
+| `Unsupported export_method` | `ios/ExportOptions.plist` の `method` は `app-store` 固定。Xcode 新名称の `app-store-connect` は fastlane(gym) の検証を通らない |
 | App 名が使えない | `D-Hub` が他者に取られている。`register_app` の `app_name` を変える |
 
 ---

@@ -16,10 +16,15 @@
 -->
 <plist version="1.0">
 <dict>
-	<!-- Xcode 15.3 以降の名称。もし xcodebuild が値を認識せずに落ちたら
-	     "app-store"（旧名）に変える。 -->
+	<!-- "app-store" 固定。
+	     Xcode 15.3 以降は "app-store-connect" が新名称だが、fastlane(gym) は
+	     この plist の method を自身の export_method オプションへ写して検証しており、
+	     その許可リストは ["app-store", "validation", "ad-hoc", "package",
+	     "enterprise", "development", "developer-id", "mac-application"] で
+	     新名称を含まない。新名称を書くと
+	     「Unsupported export_method 'app-store-connect'」でアーカイブ完了直後に落ちる。 -->
 	<key>method</key>
-	<string>app-store-connect</string>
+	<string>app-store</string>
 
 	<key>teamID</key>
 	<string>__TEAM_ID__</string>
