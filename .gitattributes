@@ -1,0 +1,15 @@
+# 改行コードの固定
+#
+# このリポジトリは Windows で開発し、CI は macOS / Ubuntu で走る。
+# core.autocrlf=true のため、指定しないとチェックアウト時に CRLF になる
+# ファイルがあり、環境によって壊れる。
+
+# シェルスクリプトは必ず LF。
+# CRLF だと shebang が "#!/usr/bin/env bash\r" と解釈され、
+# bash: $'\r': command not found で実行できなくなる。
+*.sh text eol=lf
+
+# fastlane の設定は macOS ランナー上の Ruby が読む。LF に揃えておく。
+ios/fastlane/Fastfile text eol=lf
+ios/fastlane/Appfile  text eol=lf
+ios/Gemfile           text eol=lf
