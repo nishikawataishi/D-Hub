@@ -349,7 +349,9 @@ platform :ios do
       workspace: WORKSPACE,
       scheme: SCHEME,
       configuration: CONFIGURATION,
-      export_options_plist: export_options,
+      # 引数名は export_options。plist のパスかハッシュを受ける。
+      # export_options_plist という名前のオプションは存在しない。
+      export_options: export_options,
       output_directory: "build/ipa",
       output_name: "D-Hub.ipa",
       # Flutter 側で既にビルド済みの成果物を活かすため clean しない
