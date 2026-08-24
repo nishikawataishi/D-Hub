@@ -412,12 +412,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const Divider(height: 1, indent: 56),
           _SettingsTile(
-            icon: Icons.notifications_none_outlined,
-            title: '通知設定',
-            onTap: () {},
-          ),
-          const Divider(height: 1, indent: 56),
-          _SettingsTile(
             icon: Icons.block,
             title: 'ブロックした団体',
             onTap: () {
