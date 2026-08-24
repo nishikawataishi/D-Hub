@@ -64,14 +64,12 @@
 		<string>https</string>
 		<string>calshow</string>
 	</array>
-	<key>NSCameraUsageDescription</key>
-	<string>プロフィール写真の撮影に使用します。</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>プロフィール写真の選択に使用します。</string>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
-	<string>面接や説明会の予定をカレンダーに追加するために使用します。</string>
+	<string>新歓イベントや説明会の予定をカレンダーに追加するために使用します。</string>
 	<key>NSCalendarsUsageDescription</key>
-	<string>面接や説明会の予定をカレンダーに追加するために使用します。</string>
+	<string>新歓イベントや説明会の予定をカレンダーに追加するために使用します。</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 </dict>
