@@ -308,7 +308,7 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
                       }
                       if (!context.mounted) return;
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Googleカレンダーを開きました')),
+                        const SnackBar(content: Text('カレンダーを開きました')),
                       );
                     } else {
                       final buildEvent = add2cal.Event(
@@ -333,24 +333,15 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
                     Icons.calendar_month,
                     color: AppTheme.primary,
                   ),
-                  label: const Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'カレンダーに追加',
-                        style: TextStyle(
-                          color: AppTheme.primary,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Text(
-                        'Googleカレンダーに追加',
-                        style: TextStyle(
-                          color: AppTheme.primary,
-                          fontSize: 10,
-                        ),
-                      ),
-                    ],
+                  // 副ラベルは置かない。iOS/Android は端末の純正カレンダー、
+                  // Web は Google カレンダーを開くため、行き先を名指しすると
+                  // どちらかで嘘になる。「カレンダーに追加」はどの経路でも真。
+                  label: const Text(
+                    'カレンダーに追加',
+                    style: TextStyle(
+                      color: AppTheme.primary,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
