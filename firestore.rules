@@ -78,10 +78,16 @@ service cloud.firestore {
         isOwner(docId) // 後方互換性：docIdがUIDの場合
       ));
       // コレクションクエリ: 承認済み団体の一覧は全認証ユーザー、全件は管理者のみ
-      allow list: if isAdmin() || isAuthenticated();
+      // クライアント側の getOrganizations() / getOrganizationsByCategory() の
+      // .where('status', isEqualTo: 'verified') と対。片方だけ変えてはいけない。
+      allow list: if isAdmin() ||
+                  (isAuthenticated() && resource.data.status == 'verified');
 
       // 作成は認証済みユーザーなら誰でも可能だが、初期ステータスは pending 固定
+      // docId を自分の UID に限定する。これが無いと他人の UID で団体文書を
+      // 先取りでき、その学生が団体アカウントと誤判定されてアプリが使えなくなる。
       allow create: if isAuthenticated() &&
+                    docId == request.auth.uid &&
                     request.resource.data.status == 'pending' &&
                     request.resource.data.representativeId == request.auth.uid;
 

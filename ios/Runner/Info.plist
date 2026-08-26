@@ -65,11 +65,11 @@
 		<string>calshow</string>
 	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>プロフィール写真の選択に使用します。</string>
+	<string>プロフィール写真に使う画像を、写真ライブラリから選ぶために使用します。選んだ写真はあなたのプロフィールに表示され、サークル・学生団体がメンバーを探すときに見られます。</string>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
-	<string>新歓イベントや説明会の予定をカレンダーに追加するために使用します。</string>
+	<string>気になった新歓イベントや説明会の日時・場所を、iPhone のカレンダーに予定として追加するために使用します。例えば「新歓説明会」を開催日時で登録します。カレンダーの内容を読み取ることはありません。</string>
 	<key>NSCalendarsUsageDescription</key>
-	<string>新歓イベントや説明会の予定をカレンダーに追加するために使用します。</string>
+	<string>気になった新歓イベントや説明会の日時・場所を、iPhone のカレンダーに予定として追加するために使用します。例えば「新歓説明会」を開催日時で登録します。カレンダーの内容を読み取ることはありません。</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 </dict>
