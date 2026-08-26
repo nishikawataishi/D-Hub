@@ -50,10 +50,14 @@ class FirestoreService {
     });
   }
 
-  /// 全団体を取得
+  /// 承認済み団体を取得
+  /// status の絞り込みは firestore.rules の allow list と対になっている。
+  /// ルールは返るドキュメント1件ずつに評価されるため、
+  /// ここを外すと pending が1件混ざっただけでクエリ全体が permission-denied になる。
   Stream<List<Organization>> getOrganizations() {
     return _db
         .collection('organizations')
+        .where('status', isEqualTo: 'verified')
         .orderBy('name')
         .snapshots()
         .map(
@@ -68,6 +72,7 @@ class FirestoreService {
     // whereArrayContains を使用して、指定したカテゴリーが含まれるドキュメントを取得
     return _db
         .collection('organizations')
+        .where('status', isEqualTo: 'verified')
         .where('categories', arrayContains: category.name)
         .snapshots()
         .map(

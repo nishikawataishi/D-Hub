@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:add_2_calendar/add_2_calendar.dart' as add2cal;
 import 'package:cached_network_image/cached_network_image.dart';
 
 import '../theme/app_theme.dart';
@@ -44,6 +45,17 @@ class EventScreen extends StatelessWidget {
   String _weekdayLabel(DateTime date) {
     const weekdays = ['月', '火', '水', '木', '金', '土', '日'];
     return weekdays[date.weekday - 1];
+  }
+
+  /// カレンダー導線の結果を知らせる。文面は呼び出し側が経路ごとに渡す。
+  void _showCalendarSnackBar(BuildContext context, String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+    );
   }
 
   @override
@@ -182,19 +194,31 @@ class EventScreen extends StatelessWidget {
                                 mode: LaunchMode.externalApplication,
                               );
                             }
-                          }
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  '📅 「${event.title}」をカレンダーに追加しました',
-                                ),
-                                behavior: SnackBarBehavior.floating,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
+                            if (!context.mounted) return;
+                            _showCalendarSnackBar(
+                              context,
+                              'カレンダーを開きました',
+                            );
+                          } else {
+                            // iOS/Android: 端末の純正カレンダーの追加画面を開く。
+                            // 以前はここを何もせずに抜けて「追加しました」と出していたため、
+                            // 表示が実態と違っていた。実際に保存されたときだけ通知する。
+                            final success = await add2cal.Add2Calendar.addEvent2Cal(
+                              add2cal.Event(
+                                title: event.title,
+                                description: event.description,
+                                location: campus.label,
+                                startDate: startAt,
+                                endDate: startAt.add(const Duration(hours: 2)),
                               ),
                             );
+                            if (!context.mounted) return;
+                            if (success) {
+                              _showCalendarSnackBar(
+                                context,
+                                'カレンダーに追加しました',
+                              );
+                            }
                           }
                         },
                       ),

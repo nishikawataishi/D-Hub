@@ -70,14 +70,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
       appBar: AppBar(
         title: Text(_org.name),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.share),
-            onPressed: () {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text('シェア機能は準備中です')));
-            },
-          ),
+          // シェアは未実装。「準備中です」と返すだけのボタンを置いていたので取り除いた。
           ModerationMenu(
             viewerRole: AccountRole.student,
             targetId: _org.id,

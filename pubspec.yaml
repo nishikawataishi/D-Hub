@@ -76,7 +76,7 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/images/doshisha_mark.png
+    - assets/images/dhub_mark.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

@@ -64,9 +64,11 @@ beforeEach(async () => {
     const db = ctx.firestore();
     await setDoc(doc(db, "organizations", ORG_VERIFIED), {
       name: "承認済み団体", status: "verified", representativeId: ORG_VERIFIED,
+      categories: ["sports"],
     });
     await setDoc(doc(db, "organizations", ORG_PENDING), {
       name: "審査中団体", status: "pending", representativeId: ORG_PENDING,
+      categories: ["sports"],
     });
     await setDoc(doc(db, "users", STUDENT), {
       name: "学生A", isStudentVerified: true,
@@ -169,6 +171,66 @@ test("団体オーナーは自分の団体を削除できる（退会処理）",
 
 test("他人の団体は削除できない", async () => {
   await assertFails(deleteDoc(doc(as(STUDENT), "organizations", ORG_PENDING)));
+});
+
+// ==========================================================
+// 1-b. organizations の一覧取得（審査中・却下団体の漏えい防止）
+//
+// allow list とクライアントの .where('status', isEqualTo: 'verified') は対。
+// 片方だけ変えるとホーム画面が無言で空になるので、両方をここで固める。
+// ==========================================================
+
+test("organizations list: 条件なしの全件クエリは拒否される", async () => {
+  await assertFails(getDocs(collection(as(STUDENT), "organizations")));
+  await assertFails(getDocs(collection(as(ORG_VERIFIED), "organizations")));
+});
+
+test("organizations list: status=verified に絞れば取得できる（getOrganizations のクエリ形状）", async () => {
+  await assertSucceeds(getDocs(query(
+    collection(as(STUDENT), "organizations"),
+    where("status", "==", "verified"),
+  )));
+});
+
+test("organizations list: カテゴリ絞り込みも status 付きなら取得できる（getOrganizationsByCategory のクエリ形状）", async () => {
+  await assertSucceeds(getDocs(query(
+    collection(as(STUDENT), "organizations"),
+    where("status", "==", "verified"),
+    where("categories", "array-contains", "sports"),
+  )));
+});
+
+test("organizations list: カテゴリだけで status を付けないクエリは拒否される", async () => {
+  await assertFails(getDocs(query(
+    collection(as(STUDENT), "organizations"),
+    where("categories", "array-contains", "sports"),
+  )));
+});
+
+test("organizations list: 審査中団体を狙うクエリは拒否される", async () => {
+  await assertFails(getDocs(query(
+    collection(as(STUDENT), "organizations"),
+    where("status", "==", "pending"),
+  )));
+});
+
+test("organizations list: 未認証は verified に絞っても取得できない", async () => {
+  await assertFails(getDocs(query(
+    collection(asAnon(), "organizations"),
+    where("status", "==", "verified"),
+  )));
+});
+
+test("organizations list: 管理者は全件取得できる（管理画面）", async () => {
+  await assertSucceeds(getDocs(collection(asAdmin(), "organizations")));
+});
+
+test("organizations create: 他人の UID を docId にした先取りは拒否される", async () => {
+  // docId 制約が無いと、任意の学生の UID で団体文書を作って
+  // その学生を団体アカウントと誤判定させ、アプリを使えなくできる。
+  await assertFails(setDoc(doc(as("attacker_uid"), "organizations", OTHER_STUDENT), {
+    name: "x", status: "pending", representativeId: OTHER_STUDENT,
+  }));
 });
 
 // ==========================================================

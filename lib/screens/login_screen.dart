@@ -180,7 +180,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 children: [
                   // ロゴ
                   Image.asset(
-                    'assets/images/doshisha_mark.png',
+                    'assets/images/dhub_mark.png',
                     width: 80,
                     height: 80,
                   ),
