@@ -4,7 +4,9 @@
   "description": "firestore.rules / storage.rules の単体テスト（エミュレータで実行）",
   "type": "module",
   "scripts": {
-    "test": "firebase emulators:exec --only firestore,storage \"node --test rules.test.mjs storage.rules.test.mjs\""
+    "test": "firebase emulators:exec --only firestore,storage \"node --test rules.test.mjs storage.rules.test.mjs\"",
+    "test:functions": "firebase emulators:exec --only auth,firestore,functions,storage --project d-scout-6d281 \"node --test functions.test.mjs\"",
+    "test:all": "npm test && npm run test:functions"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "5.0.0",
