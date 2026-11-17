@@ -1,9 +1,95 @@
 rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users/{userId}
+//   - isStudentVerified: bool (必須・サーバー管理。create時はfalse固定、update不可)
+//   - createdAt: timestamp (任意・create時のみ設定可、update不可)
+//   - verifiedAt: timestamp (任意・サーバー管理、クライアント書き込み不可)
+//   - name: string (任意・0〜100文字)
+//   - faculty: string (任意・0〜100文字)
+//   - grade: int (任意・1〜10)
+//   - mainCampus: string (任意・'imadegawa' | 'kyotanabe' | 'both')
+//   - interests: list<string> (任意・最大50件、合計1500文字以内)
+//   - iconUrl: string | null (任意・本プロジェクトのFirebase Storage URLのみ)
+//   - photoUrls: list<string> (任意・最大10件、各要素は本プロジェクトのStorage URL)
+//
+// Subcollection: users/{userId}/private/{docId}
+//   - サーバー（Admin SDK）専用。管理者のreadのみ許可、クライアントwrite完全禁止
+//
+// Subcollection: users/{userId}/blocks/{blockedId}
+//   - targetName: string (任意・最大200文字)
+//   - createdAt: timestamp (任意)
+//
+// Collection: organizations/{docId} (docId == 代表者UID)
+//   - id: string (任意・docIdと一致)
+//   - name: string (必須・1〜100文字)
+//   - description: string (任意・0〜2000文字)
+//   - categories: list<string> (任意・最大25件、OrgCategory列挙値のみ)
+//   - campus: string (任意・'imadegawa' | 'kyotanabe' | 'both')
+//   - logoEmoji: string (任意・最大20文字)
+//   - instagramUrl: string (任意・空文字/@ハンドル/instagram.comドメインのみ)
+//   - groupLineUrl: string (任意・空文字または https://line.me/ / https://lin.ee/ のみ)
+//   - logoUrl: string | null (任意・本プロジェクトのStorage URLのみ)
+//   - proofImageUrl: string | null (任意・本プロジェクトのStorage URLのみ)
+//   - photoUrls: list<string> (任意・最大10件、本プロジェクトのStorage URLのみ)
+//   - representativeId: string (必須・作成者UID固定、変更不可)
+//   - status: string (必須・create時は'pending'固定、管理者のみ変更可)
+//   - isOfficial: bool (任意・create時はfalse固定、オーナー変更不可)
+//   - verifiedAt: timestamp | string | null (サーバー/管理者管理、オーナー変更不可)
+//   - createdAt: timestamp | string (任意・オーナーupdate不可)
+//
+// Subcollection: organizations/{docId}/blocks/{blockedId}
+//   - targetName: string (任意・最大200文字)
+//   - createdAt: timestamp (任意)
+//
+// Collection: events/{eventId}
+//   - organizationId: string (必須・主催団体UID固定、変更不可)
+//   - organizationName: string (任意・自団体名と一致、または更新時は既存値維持可)
+//   - organizationEmoji: string (任意・最大20文字)
+//   - organizationCategory: string (任意・最大30文字)
+//   - categories: list<string> (任意・後方互換)
+//   - title: string (必須・1〜100文字)
+//   - description: string (任意・0〜2000文字)
+//   - startAt: timestamp (必須・create時は現在以降、過去日時への巻き戻し不可)
+//   - campus: string (任意・'imadegawa' | 'kyotanabe' | 'both')
+//   - organizationLogoUrl: string | null (任意・本プロジェクトのStorage URLのみ)
+//   - fee: string | null (任意・最大100文字)
+//   - capacity: string | null (任意・最大100文字)
+//   - location: string | null (任意・最大200文字)
+//   - groupLineUrl: string | null (任意・https://line.me/ または https://lin.ee/ のみ)
+//   - createdAt / updatedAt: timestamp (任意)
+//
+// Subcollection: events/{eventId}/applications/{applicationId} (applicationId == studentId)
+//   - studentId: string (必須・申込学生UID)
+//   - studentName: string (必須・1〜100文字)
+//   - studentFaculty: string (必須・1〜100文字)
+//   - studentGrade: int (必須・1〜10)
+//   - studentIconUrl: string | null (任意・本プロジェクトのStorage URLのみ)
+//   - status: string ('applied' | 'accepted' | 'rejected')
+//   - appliedAt / respondedAt: timestamp
+//
+// Collection: scouts/{docId}
+//   - 定型文テンプレートID(0〜4)＋検証済み埋め込み値＋送信元団体整合性＋URL検証
+//
+// Collection: reports/{reportId}
+//   - 通報データ（ホワイトリスト・文字数制限・snapshot内キーおよびサイズ制限）
+//
+// Collection: contacts/{docId}
+//   - userId, category, message(1〜2000文字), status('open'), createdAt(timestamp)
+//
+// Collection: tags/{docId}
+//   - name(1〜100文字), createdAt(timestamp)
+//
+// ===============================================================
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    
+
     // ==========================================================
-    // ヘルパー関数
+    // 共通ヘルパー関数（認証・ロール判定）
     // ==========================================================
     function isAuthenticated() {
       return request.auth != null;
@@ -15,108 +101,267 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() &&
-        request.auth.token.admin == true;
+        request.auth.token.get('admin', false) == true;
+    }
+
+    // 学生の第2層認証（大学メール確認コード検証）が完了しているかチェック
+    function isVerifiedStudent() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isStudentVerified', false) == true;
+    }
+
+    // 団体アカウント（審査中・却下・承認済みすべて含む）が存在するかチェック
+    function isOrgAccount() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/organizations/$(request.auth.uid));
     }
 
     // 呼び出し元の団体が審査承認済みかチェック
     function isVerifiedOrg() {
       return isAuthenticated() &&
-        get(/databases/$(database)/documents/organizations/$(request.auth.uid)).data.status == 'verified';
+        exists(/databases/$(database)/documents/organizations/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/organizations/$(request.auth.uid)).data.get('status', '') == 'verified';
+    }
+
+    // ==========================================================
+    // 共通バリデーション関数（URL・画像・配列・列挙値）
+    // ==========================================================
+
+    // 本プロジェクト（d-scout-6d281）の Firebase Storage 画像URLのみを許可（外部IPロガー・巨大画像対策）
+    function isValidStorageImageUrl(url) {
+      return url is string &&
+        url.size() <= 2048 &&
+        (url == '' ||
+         url.matches('^https://firebasestorage\\.googleapis\\.com/v0/b/d-scout-6d281\\.(firebasestorage\\.app|appspot\\.com)/o/[^\\s<>"]+$'));
+    }
+
+    // ギャラリー写真URLリストの各要素を検証（UI上限4枚＋余裕を持たせて最大6枚）
+    function isValidPhotoUrlList(rawUrls) {
+      let urls = rawUrls;
+      let n = urls.size();
+      return urls is list
+        && n <= 6
+        && (n < 1 || isValidStorageImageUrl(urls[0]))
+        && (n < 2 || isValidStorageImageUrl(urls[1]))
+        && (n < 3 || isValidStorageImageUrl(urls[2]))
+        && (n < 4 || isValidStorageImageUrl(urls[3]))
+        && (n < 5 || isValidStorageImageUrl(urls[4]))
+        && (n < 6 || isValidStorageImageUrl(urls[5]));
+    }
+
+    // Instagram入力の検証（空文字、@ユーザー名、ユーザー名のみ、instagram.com URLのみ許可）
+    function isValidInstagramUrl(url) {
+      return url is string
+        && url.size() <= 300
+        && (
+          url == ''
+          || url.matches('^@?[a-zA-Z0-9._]{1,30}/?$')
+          || url.matches('^(https?://)?(www\\.)?instagram\\.com(/[a-zA-Z0-9._/?=&%-]*)?$')
+        );
+    }
+
+    // グループLINE招待・オープンチャット・公式LINE URLの検証（フィッシングサイト誘導防止）
+    function isValidGroupLineUrl(url) {
+      return url is string
+        && url.size() <= 300
+        && (
+          url == ''
+          || url.matches('^https://(line\\.me|lin\\.ee)/[a-zA-Z0-9._~@/?=&%+-]+$')
+        );
+    }
+
+    function isValidCampus(campus) {
+      return campus in ['imadegawa', 'kyotanabe', 'both'];
+    }
+
+    function isValidOrgCategoryList(categories) {
+      return categories is list
+        && categories.size() <= 25
+        && categories.hasOnly([
+          'all', 'sports', 'culture', 'academic', 'volunteer',
+          'music', 'varsity', 'tennis', 'event', 'sportsCircle',
+          'it', 'international', 'beginner', 'competitive', 'enjoy',
+          'joint', 'intercollege', 'homey', 'large', 'female', 'male'
+        ]);
+    }
+
+    // 興味タグ配列の要素型（string）と全体文字数を低コスト（1000式制限未満）で厳密検査（最大20件）
+    function isValidInterestList(rawItems) {
+      let items = rawItems;
+      let n = items.size();
+      return items is list
+        && n <= 20
+        && items.join('').size() <= 1000
+        && (n < 1 || items[0] is string)
+        && (n < 2 || items[1] is string)
+        && (n < 3 || items[2] is string)
+        && (n < 4 || items[3] is string)
+        && (n < 5 || items[4] is string)
+        && (n < 6 || items[5] is string)
+        && (n < 7 || items[6] is string)
+        && (n < 8 || items[7] is string)
+        && (n < 9 || items[8] is string)
+        && (n < 10 || items[9] is string)
+        && (n < 11 || items[10] is string)
+        && (n < 12 || items[11] is string)
+        && (n < 13 || items[12] is string)
+        && (n < 14 || items[13] is string)
+        && (n < 15 || items[14] is string)
+        && (n < 16 || items[15] is string)
+        && (n < 17 || items[16] is string)
+        && (n < 18 || items[17] is string)
+        && (n < 19 || items[18] is string)
+        && (n < 20 || items[19] is string);
+    }
+
+    function isValidBlockDoc(blockedId) {
+      let d = request.resource.data;
+      return blockedId.size() >= 1
+        && blockedId.size() <= 128
+        && d.keys().hasOnly(['targetName', 'createdAt'])
+        && (!('targetName' in d) || (d.targetName is string && d.targetName.size() <= 200))
+        && (!('createdAt' in d) || d.createdAt is timestamp);
     }
 
     // ==========================================================
     // users コレクション
     // ==========================================================
     match /users/{userId} {
+      // users プロフィール各フィールドの型・サイズ検証（省略・nullはレガシー互換のため許容）
+      function isValidUserFields(d) {
+        return (!('name' in d) || d.name == null || (d.name is string && d.name.size() <= 100))
+          && (!('faculty' in d) || d.faculty == null || (d.faculty is string && d.faculty.size() <= 100))
+          && (!('grade' in d) || d.grade == null || (d.grade is int && d.grade >= 1 && d.grade <= 10))
+          && (!('mainCampus' in d) || d.mainCampus == null || isValidCampus(d.mainCampus))
+          && (!('interests' in d) || d.interests == null || isValidInterestList(d.interests))
+          && (!('iconUrl' in d) || d.iconUrl == null || isValidStorageImageUrl(d.iconUrl))
+          && (!('photoUrls' in d) || d.photoUrls == null || isValidPhotoUrlList(d.photoUrls));
+      }
+
       // 本人・承認済み団体・管理者のみ閲覧可能
-      allow get: if isOwner(userId) || isVerifiedOrg() || isAdmin();
-      allow list: if isVerifiedOrg() || isAdmin();
-      // updateは本人のみ可能。ただしサーバー管理フィールドは変更不可
-      // （レート制限カウンタ・大学メール等の自己改ざん防止を含む）
-      allow update: if isOwner(userId) &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(
-          ['isStudentVerified', 'verificationCode', 'codeExpiresAt', 'verifiedAt',
-           'verificationAttempts', 'lastCodeSentAt', 'codeHashedValue',
-           'codeSentCount', 'codeSentWindowStart', 'universityEmail', 'email']
-        );
-      // createは本人のみ可能。ただし認証済み状態やサーバー管理フィールドを
-      // 持ったドキュメントは作成不可（delete→再createによる学生認証バイパス対策）
-      allow create: if isOwner(userId) &&
-        request.resource.data.get('isStudentVerified', false) == false &&
-        !request.resource.data.keys().hasAny(
-          ['verificationCode', 'codeExpiresAt', 'verifiedAt',
-           'verificationAttempts', 'lastCodeSentAt', 'codeHashedValue',
-           'codeSentCount', 'codeSentWindowStart', 'universityEmail']
-        );
-      allow delete: if isOwner(userId) || isAdmin();
+      allow get: if isAdmin() || isOwner(userId) || isVerifiedOrg();
+      allow list: if isAdmin() || isVerifiedOrg();
+
+      // createは本人のみ可能。初期状態は未認証（isStudentVerified == false）の最小フィールドに限定し、
+      // 未認証アカウントがプロフィール名を設定して学生一覧に混入することや再create認証バイパスを防ぐ
+      allow create: if isOwner(userId)
+        && !exists(/databases/$(database)/documents/organizations/$(userId))
+        && request.resource.data.keys().hasOnly(['isStudentVerified', 'createdAt'])
+        && request.resource.data.get('isStudentVerified', false) == false
+        && (!('isStudentVerified' in request.resource.data) || request.resource.data.isStudentVerified is bool)
+        && (!('createdAt' in request.resource.data) || request.resource.data.createdAt is timestamp);
+
+      // updateは大学メール認証済みの本人のみ可能。変更可能キーをプロフィール項目のみに限定し、
+      // サーバー管理フィールドの改ざん・未知キー混入・型破壊（Poison Pill DoS）を防ぐ
+      allow update: if isOwner(userId)
+        && isVerifiedStudent()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'name', 'faculty', 'grade', 'mainCampus',
+             'interests', 'iconUrl', 'photoUrls'
+           ])
+        && isValidUserFields(request.resource.data);
+
+      allow delete: if isAdmin() || isOwner(userId);
 
       // ── privateサブコレクション（認証メタデータ・大学メール等） ──
-      // Cloud Function（Admin SDK）のみが読み書きする。クライアントからは
-      // 管理者の読み取り以外一切アクセス不可（団体への個人情報露出防止）
       match /private/{docId} {
         allow read: if isAdmin();
         allow write: if false;
       }
 
       // ── blocks サブコレクション（学生がブロックした団体） ──
-      // ドキュメントIDはブロックした団体のUID。本人だけが読み書きでき、
-      // ブロックされた側からは参照できない（利用規約 第8条3）。
-      // 運営は通報対応の調査のために読み取れる。
       match /blocks/{blockedId} {
-        allow read: if isOwner(userId) || isAdmin();
-        allow create: if isOwner(userId) && blockedId != userId;
-        allow delete: if isOwner(userId);
+        allow read: if isAdmin() || isOwner(userId);
+        allow create: if isOwner(userId)
+          && isVerifiedStudent()
+          && blockedId != userId
+          && isValidBlockDoc(blockedId);
+        allow delete: if isAdmin() || isOwner(userId);
         allow update: if false;
       }
     }
 
+    // ==========================================================
+    // organizations コレクション
+    // ==========================================================
     match /organizations/{docId} {
-      // 個別ドキュメント取得: 承認済みは誰でも、申請中/却下は作成者本人 or 管理者
-      allow get: if isAdmin() || (isAuthenticated() && (
-        resource.data.status == 'verified' ||
-        isOwner(resource.data.representativeId) ||
-        isOwner(docId) // 後方互換性：docIdがUIDの場合
-      ));
-      // コレクションクエリ: 承認済み団体の一覧は全認証ユーザー、全件は管理者のみ
-      // クライアント側の getOrganizations() / getOrganizationsByCategory() の
-      // .where('status', isEqualTo: 'verified') と対。片方だけ変えてはいけない。
+      function isValidOrgFields(d) {
+        return (!('id' in d) || d.id == null || (d.id is string && d.id == docId))
+          && ('name' in d && d.name is string && d.name.size() >= 1 && d.name.size() <= 100)
+          && (!('description' in d) || d.description == null || (d.description is string && d.description.size() <= 2000))
+          && (!('categories' in d) || d.categories == null || isValidOrgCategoryList(d.categories))
+          && (!('campus' in d) || d.campus == null || isValidCampus(d.campus))
+          && (!('logoEmoji' in d) || d.logoEmoji == null || (d.logoEmoji is string && d.logoEmoji.size() <= 20))
+          && (!('instagramUrl' in d) || d.instagramUrl == null || isValidInstagramUrl(d.instagramUrl))
+          && (!('groupLineUrl' in d) || d.groupLineUrl == null || isValidGroupLineUrl(d.groupLineUrl))
+          && (!('logoUrl' in d) || d.logoUrl == null || isValidStorageImageUrl(d.logoUrl))
+          && (!('proofImageUrl' in d) || d.proofImageUrl == null || isValidStorageImageUrl(d.proofImageUrl))
+          && (!('photoUrls' in d) || d.photoUrls == null || isValidPhotoUrlList(d.photoUrls))
+          && (!('isOfficial' in d) || d.isOfficial is bool)
+          && (!('createdAt' in d) || d.createdAt == null || d.createdAt is timestamp ||
+              (d.createdAt is string && d.createdAt.size() <= 40));
+      }
+
+      // 個別取得:
+      // - 管理者・docId本人（AuthNotifier._resolveUserStatus での存在確認を含む）・代表者本人
+      // - 承認済み団体は「認証済み学生」または「承認済み団体」のみ閲覧可（未認証アカウントを遮断）
+      allow get: if isAdmin()
+        || isOwner(docId)
+        || (resource != null && isOwner(resource.data.get('representativeId', '')))
+        || (resource != null && resource.data.get('status', '') == 'verified' && (isVerifiedStudent() || isVerifiedOrg()));
+
+      // 一覧取得: 承認済み団体一覧は「認証済み学生」または「承認済み団体」のみ、全件は管理者のみ
       allow list: if isAdmin() ||
-                  (isAuthenticated() && resource.data.status == 'verified');
+        ((isVerifiedStudent() || isVerifiedOrg()) && resource.data.get('status', '') == 'verified');
 
-      // 作成は認証済みユーザーなら誰でも可能だが、初期ステータスは pending 固定
-      // docId を自分の UID に限定する。これが無いと他人の UID で団体文書を
-      // 先取りでき、その学生が団体アカウントと誤判定されてアプリが使えなくなる。
-      allow create: if isAuthenticated() &&
-                    docId == request.auth.uid &&
-                    request.resource.data.status == 'pending' &&
-                    request.resource.data.representativeId == request.auth.uid;
+      // 作成: 自分のUIDをdocIdとし、初期ステータス pending・representativeId=自分・isOfficial=false 固定
+      allow create: if isAuthenticated()
+        && docId == request.auth.uid
+        && !exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && request.resource.data.keys().hasAll(['name', 'status', 'representativeId'])
+        && request.resource.data.keys().hasOnly([
+             'id', 'name', 'description', 'categories', 'campus', 'logoEmoji',
+             'instagramUrl', 'groupLineUrl', 'logoUrl', 'representativeId',
+             'status', 'proofImageUrl', 'verifiedAt', 'isOfficial',
+             'createdAt', 'photoUrls'
+           ])
+        && request.resource.data.status == 'pending'
+        && request.resource.data.representativeId == request.auth.uid
+        && (!('verifiedAt' in request.resource.data) || request.resource.data.verifiedAt == null)
+        && (!('isOfficial' in request.resource.data) || request.resource.data.isOfficial == false)
+        && isValidOrgFields(request.resource.data);
 
-      // 更新：管理者はステータス変更可能、オーナーは審査関連フィールド以外を変更可能
-      // （statusを他フィールドと同時に更新しても自己承認できないよう hasAny で禁止）
-      allow update: if isAdmin() ||
-                    ((isOwner(resource.data.representativeId) || isOwner(docId)) &&
-                    !request.resource.data.diff(resource.data).affectedKeys().hasAny(
-                      ['status', 'verifiedAt', 'representativeId']
-                    ));
+      // 更新: 管理者はステータス変更可能、オーナーはプロフィール項目のみ更新可能（自己承認・公認詐称不可）
+      allow update: if isAdmin() || (
+        (isOwner(docId) || isOwner(resource.data.get('representativeId', '')))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'id', 'name', 'description', 'categories', 'campus', 'logoEmoji',
+             'instagramUrl', 'groupLineUrl', 'logoUrl', 'proofImageUrl', 'photoUrls'
+           ])
+        && isValidOrgFields(request.resource.data)
+      );
 
-      // 削除：管理者または団体オーナー本人（退会処理用）
-      allow delete: if isAdmin() ||
-                    isOwner(resource.data.representativeId) ||
-                    isOwner(docId);
+      // 削除: 管理者または団体オーナー本人
+      allow delete: if isAdmin()
+        || isOwner(docId)
+        || isOwner(resource.data.get('representativeId', ''));
 
       // ── blocks サブコレクション（団体がブロックした学生） ──
-      // ドキュメントIDはブロックした学生のUID。団体オーナーだけが読み書きでき、
-      // ブロックされた学生からは参照できない（利用規約 第8条3）。
       match /blocks/{blockedId} {
         function isOrgOwner() {
           return isOwner(docId) ||
             (isAuthenticated() &&
+             exists(/databases/$(database)/documents/organizations/$(docId)) &&
              get(/databases/$(database)/documents/organizations/$(docId))
-               .data.representativeId == request.auth.uid);
+               .data.get('representativeId', '') == request.auth.uid);
         }
-        allow read: if isOrgOwner() || isAdmin();
-        allow create: if isOrgOwner() && blockedId != docId;
-        allow delete: if isOrgOwner();
+        allow read: if isAdmin() || isOrgOwner();
+        allow create: if isOrgOwner()
+          && exists(/databases/$(database)/documents/organizations/$(docId))
+          && blockedId != docId
+          && isValidBlockDoc(blockedId);
+        allow delete: if isAdmin() || isOrgOwner();
         allow update: if false;
       }
     }
@@ -125,44 +370,119 @@ service cloud.firestore {
     // events コレクション
     // ==========================================================
     match /events/{eventId} {
-      allow read: if isAuthenticated();
-      // 団体UID制限: 審査承認済みの団体のみ作成・更新・削除可能
-      allow create: if isVerifiedOrg() && request.resource.data.organizationId == request.auth.uid;
+      function currentOrgName() {
+        return get(/databases/$(database)/documents/organizations/$(request.auth.uid)).data.get('name', '');
+      }
+
+      function isValidEventFields(d) {
+        return d.organizationId == request.auth.uid
+          && ('title' in d && d.title is string && d.title.size() >= 1 && d.title.size() <= 100)
+          && (!('description' in d) || d.description == null || (d.description is string && d.description.size() <= 2000))
+          && ('startAt' in d && d.startAt is timestamp)
+          && (!('campus' in d) || d.campus == null || isValidCampus(d.campus))
+          && (!('organizationEmoji' in d) || d.organizationEmoji == null || (d.organizationEmoji is string && d.organizationEmoji.size() <= 20))
+          && (!('organizationCategory' in d) || d.organizationCategory == null || (d.organizationCategory is string && d.organizationCategory.size() <= 30))
+          && (!('categories' in d) || d.categories == null || isValidOrgCategoryList(d.categories))
+          && (!('organizationLogoUrl' in d) || d.organizationLogoUrl == null || isValidStorageImageUrl(d.organizationLogoUrl))
+          && (!('fee' in d) || d.fee == null || (d.fee is string && d.fee.size() <= 100))
+          && (!('capacity' in d) || d.capacity == null || (d.capacity is string && d.capacity.size() <= 100))
+          && (!('location' in d) || d.location == null || (d.location is string && d.location.size() <= 200))
+          && (!('groupLineUrl' in d) || d.groupLineUrl == null || isValidGroupLineUrl(d.groupLineUrl))
+          && (!('createdAt' in d) || d.createdAt == null || d.createdAt is timestamp)
+          && (!('updatedAt' in d) || d.updatedAt == null || d.updatedAt is timestamp);
+      }
+
+      // 閲覧: 管理者・認証済み学生・承認済み団体、または主催団体本人（審査中/却下団体のダッシュボード互換）
+      allow read: if isAdmin()
+        || isVerifiedStudent()
+        || isVerifiedOrg()
+        || (isAuthenticated() && resource.data.organizationId == request.auth.uid);
+
+      // 作成: 審査承認済みの団体のみ。過去日時の隠しイベント作成および団体名詐称を禁止
+      allow create: if isVerifiedOrg()
+        && request.resource.data.keys().hasAll(['organizationId', 'title', 'startAt'])
+        && request.resource.data.keys().hasOnly([
+             'organizationId', 'organizationName', 'organizationEmoji',
+             'organizationCategory', 'categories', 'title', 'description',
+             'startAt', 'campus', 'organizationLogoUrl', 'fee', 'capacity',
+             'location', 'groupLineUrl', 'createdAt', 'updatedAt'
+           ])
+        && isValidEventFields(request.resource.data)
+        && request.resource.data.startAt > request.time - duration.value(15, 'm')
+        && (!('organizationName' in request.resource.data) ||
+            request.resource.data.organizationName == currentOrgName());
+
+      // 更新: 主催団体（承認済み）のみ。過去日時への巻き戻しや他団体名への詐称を禁止
       allow update: if isVerifiedOrg()
-                    && resource.data.organizationId == request.auth.uid
-                    && request.resource.data.organizationId == request.auth.uid;
-      allow delete: if isVerifiedOrg() && resource.data.organizationId == request.auth.uid;
+        && resource.data.organizationId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'organizationName', 'organizationEmoji', 'organizationCategory',
+             'categories', 'title', 'description', 'startAt', 'campus',
+             'organizationLogoUrl', 'fee', 'capacity', 'location',
+             'groupLineUrl', 'updatedAt'
+           ])
+        && isValidEventFields(request.resource.data)
+        && (request.resource.data.startAt > request.time - duration.value(15, 'm') ||
+            request.resource.data.startAt == resource.data.get('startAt', null))
+        && (!('organizationName' in request.resource.data) ||
+            request.resource.data.organizationName == currentOrgName() ||
+            request.resource.data.organizationName == resource.data.get('organizationName', ''));
+
+      allow delete: if isAdmin() ||
+        (isVerifiedOrg() && resource.data.organizationId == request.auth.uid);
 
       // ── イベント申し込み（applications サブコレクション） ──
       match /applications/{applicationId} {
-        // 読み取り: 申し込んだ学生本人 または イベント主催団体
-        allow get: if isAuthenticated() && (
-          request.auth.uid == applicationId ||
-          get(/databases/$(database)/documents/events/$(eventId)).data.organizationId == request.auth.uid
-        );
-        // 一覧取得: イベント主催団体のみ（学生は自分の申し込みは get で取得）
-        allow list: if isAuthenticated() &&
-          get(/databases/$(database)/documents/events/$(eventId)).data.organizationId == request.auth.uid;
+        function isEventOrganizer() {
+          return isAuthenticated()
+            && exists(/databases/$(database)/documents/events/$(eventId))
+            && get(/databases/$(database)/documents/events/$(eventId)).data.organizationId == request.auth.uid;
+        }
 
-        // 作成: 認証済み学生のみ。docIDは自分のUID固定で1人1申し込みを保証。初期ステータスは applied 固定
-        allow create: if isAuthenticated()
-                      && applicationId == request.auth.uid
-                      && request.resource.data.studentId == request.auth.uid
-                      && request.resource.data.status == 'applied';
+        function isValidApplicationCreate() {
+          let d = request.resource.data;
+          return d.keys().hasAll([
+                   'studentId', 'studentName', 'studentFaculty',
+                   'studentGrade', 'status', 'appliedAt'
+                 ])
+            && d.keys().hasOnly([
+                 'studentId', 'studentName', 'studentFaculty',
+                 'studentGrade', 'studentIconUrl', 'status', 'appliedAt'
+               ])
+            && d.studentId == request.auth.uid
+            && d.studentName is string && d.studentName.size() >= 1 && d.studentName.size() <= 100
+            && d.studentFaculty is string && d.studentFaculty.size() >= 1 && d.studentFaculty.size() <= 100
+            && d.studentGrade is int && d.studentGrade >= 1 && d.studentGrade <= 10
+            && (!('studentIconUrl' in d) || d.studentIconUrl == null || isValidStorageImageUrl(d.studentIconUrl))
+            && d.status == 'applied'
+            && d.appliedAt is timestamp;
+        }
 
-        // 更新: 主催団体がステータスと respondedAt のみ変更可能
-        allow update: if isAuthenticated()
-                      && get(/databases/$(database)/documents/events/$(eventId)).data.organizationId == request.auth.uid
-                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt']);
+        // 読み取り: 大学メール認証済みの申込本人、イベント主催団体、または管理者
+        allow get: if isAdmin()
+          || (isVerifiedStudent() && request.auth.uid == applicationId)
+          || isEventOrganizer();
 
-        // 削除: 申し込んだ学生本人（キャンセル）、イベント主催団体、管理者。
-        // 主催団体を含めるのは、団体がイベントを消したときに applications が
-        // 孤児として残るのを防ぐため（サブコレクションは親を消しても残る）。
-        // ⚠️ 主催団体判定は events ドキュメントを参照するので、イベント本体より
-        // 先に applications を消すこと。順序を逆にすると参照先が消えて拒否される。
+        // 一覧取得: イベント主催団体または管理者のみ
+        allow list: if isAdmin() || isEventOrganizer();
+
+        // 作成: 大学メール認証済みの学生のみ（未認証アカウントによる偽装申込を遮断）
+        allow create: if isVerifiedStudent()
+          && exists(/databases/$(database)/documents/events/$(eventId))
+          && applicationId == request.auth.uid
+          && isValidApplicationCreate();
+
+        // 更新: 主催団体（承認済み）が status と respondedAt のみ変更可能
+        allow update: if isVerifiedOrg()
+          && isEventOrganizer()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt'])
+          && request.resource.data.status in ['applied', 'accepted', 'rejected']
+          && (!('respondedAt' in request.resource.data) || request.resource.data.respondedAt is timestamp);
+
+        // 削除: 申し込んだ学生本人（キャンセル）、イベント主催団体、管理者
         allow delete: if isAdmin() || (isAuthenticated() && (
           request.auth.uid == applicationId ||
-          get(/databases/$(database)/documents/events/$(eventId)).data.organizationId == request.auth.uid
+          isEventOrganizer()
         ));
       }
     }
@@ -171,11 +491,9 @@ service cloud.firestore {
     // scouts コレクション
     // ==========================================================
     match /scouts/{docId} {
-      // ── 定型文スカウトの検証（自由記述の禁止） ──
-      // 団体は本文を自由に書けず、5種類の定型文から選ぶ。埋め込む値も
-      // 「対象学生が実際に登録している値」または「自団体が実際に公開している
-      // イベント」と一致していなければ保存できない。これにより自由記述は
-      // 運用ルールではなくシステム上の制約として排除される。
+      function senderOrg() {
+        return get(/databases/$(database)/documents/organizations/$(request.auth.uid)).data;
+      }
 
       function scoutTarget() {
         return get(/databases/$(database)/documents/users/$(request.resource.data.targetUserId)).data;
@@ -185,19 +503,13 @@ service cloud.firestore {
         return get(/databases/$(database)/documents/events/$(request.resource.data.templateEventId)).data;
       }
 
-      // 送信先の学生が送信元の団体をブロックしていないこと。
-      // 「ブロックした団体からはスカウトが届かない」（利用規約 第8条2）を
-      // クライアントの実装ではなくルールで保証する。
       function isNotBlockedByTarget() {
         return !exists(/databases/$(database)/documents/users/$(request.resource.data.targetUserId)/blocks/$(request.auth.uid));
       }
 
-      function isValidScoutTemplate() {
+      function isValidScoutCreate() {
         let d = request.resource.data;
-        return d.templateId is int
-          && d.templateId >= 0
-          && d.templateId <= 4
-          // 想定外のフィールドを一切許可しない（旧形式の message もここで弾かれる）
+        return d.keys().hasAll(['targetUserId', 'organizationId', 'templateId', 'isRead'])
           && d.keys().hasOnly([
               'targetUserId', 'organizationId', 'organizationName',
               'organizationEmoji', 'organizationCategory',
@@ -206,18 +518,42 @@ service cloud.firestore {
               'organizationInstagramUrl', 'organizationGroupLineUrl',
               'organizationLogoUrl', 'targetUserIconUrl', 'targetUserName'
              ])
+          && d.targetUserId is string
+          && d.targetUserId.size() >= 1 && d.targetUserId.size() <= 128
+          && exists(/databases/$(database)/documents/users/$(d.targetUserId))
+          && scoutTarget().get('isStudentVerified', false) == true
+          && d.isRead == false
+          && (!('readAt' in d) || d.readAt == null)
+          && (!('sentAt' in d) || d.sentAt is timestamp)
+          // 団体名のなりすまし・自由記述混入を禁止（自団体の実名と完全一致を強制）
+          && (!('organizationName' in d) || d.organizationName == senderOrg().get('name', ''))
+          && (!('organizationEmoji' in d) || (d.organizationEmoji is string && d.organizationEmoji.size() <= 20))
+          && (!('organizationCategory' in d) || (d.organizationCategory is string && d.organizationCategory.size() <= 30))
+          // URLのフィッシング・外部IPロガー対策
+          && (!('organizationInstagramUrl' in d) || d.organizationInstagramUrl == null || isValidInstagramUrl(d.organizationInstagramUrl))
+          && (!('organizationGroupLineUrl' in d) || d.organizationGroupLineUrl == null || isValidGroupLineUrl(d.organizationGroupLineUrl))
+          && (!('organizationLogoUrl' in d) || d.organizationLogoUrl == null || isValidStorageImageUrl(d.organizationLogoUrl))
+          && (!('targetUserIconUrl' in d) || d.targetUserIconUrl == null || isValidStorageImageUrl(d.targetUserIconUrl))
+          && (!('targetUserName' in d) || d.targetUserName == null || (d.targetUserName is string && d.targetUserName.size() <= 100))
+          && d.templateId is int
+          && d.templateId >= 0
+          && d.templateId <= 4
           && (
             // 0: 興味タグに共感 → 対象学生が登録しているタグのみ
             (d.templateId == 0
               && d.templateArg is string
+              && d.templateArg.size() <= 100
               && d.templateArg in scoutTarget().get('interests', []))
-            // 1: イベントに招待 → 自団体のイベントで、タイトルが実物と一致すること
+            // 1: イベントに招待 → 自団体の公開中イベント（過去日時の隠しイベントは不可）かつタイトル一致
             || (d.templateId == 1
               && d.templateArg is string
+              && d.templateArg.size() <= 100
               && d.templateEventId is string
+              && d.templateEventId.size() <= 128
               && exists(/databases/$(database)/documents/events/$(d.templateEventId))
               && pickedEvent().organizationId == request.auth.uid
-              && pickedEvent().title == d.templateArg)
+              && pickedEvent().title == d.templateArg
+              && (!('startAt' in pickedEvent()) || pickedEvent().startAt > request.time))
             // 2: 同じキャンパス → 対象学生の登録キャンパスと一致
             || (d.templateId == 2
               && d.templateArg is string
@@ -232,30 +568,31 @@ service cloud.firestore {
           );
       }
 
-      // 読み取りはスカウト対象の学生、または送信元の団体のみ
-      allow get: if isAuthenticated() &&
-        (request.auth.uid == resource.data.targetUserId ||
-         request.auth.uid == resource.data.organizationId);
-      // listクエリは当事者（スカウト対象の学生 or 送信元団体）のみ。
-      // クライアントのクエリはwhere条件で自分のUIDを指定している必要がある
-      allow list: if isAdmin() || (isAuthenticated() &&
+      // 読み取りは当事者（認証済み学生または承認済み団体）および管理者のみ
+      allow get: if isAdmin() || ((isVerifiedStudent() || isVerifiedOrg()) &&
         (request.auth.uid == resource.data.targetUserId ||
          request.auth.uid == resource.data.organizationId));
 
-      // 更新（既読フラグなど）は対象学生のみ、かつisReadとreadAtのみ更新可能
-      allow update: if isAuthenticated()
-                    && request.auth.uid == resource.data.targetUserId
-                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'readAt']);
+      allow list: if isAdmin() || ((isVerifiedStudent() || isVerifiedOrg()) &&
+        (request.auth.uid == resource.data.targetUserId ||
+         request.auth.uid == resource.data.organizationId));
 
-      // 作成は審査承認済みの団体のみ。本文は定型文に限定され、自由記述はできない
+      // 既読更新は対象学生（認証済み）のみ、isRead と readAt のみ変更可能
+      allow update: if isVerifiedStudent()
+        && request.auth.uid == resource.data.targetUserId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'readAt'])
+        && request.resource.data.isRead is bool
+        && (!('readAt' in request.resource.data) ||
+            request.resource.data.readAt == null ||
+            request.resource.data.readAt is timestamp);
+
+      // 作成は審査承認済みの団体のみ
       allow create: if isVerifiedOrg()
-                    && request.resource.data.organizationId == request.auth.uid
-                    && isNotBlockedByTarget()
-                    && isValidScoutTemplate();
+        && request.resource.data.organizationId == request.auth.uid
+        && isNotBlockedByTarget()
+        && isValidScoutCreate();
 
-      // 削除は当事者（スカウト対象の学生 or 送信元団体）と管理者のみ。
-      // delete ルールが無いと退会時にスカウトが消せず、学生名やLINE URLを含む
-      // レコードが残り続ける（規約第14条2に違反する）。管理者も消せなかった。
+      // 削除は当事者または管理者のみ
       allow delete: if isAdmin() || (isAuthenticated() &&
         (request.auth.uid == resource.data.targetUserId ||
          request.auth.uid == resource.data.organizationId));
@@ -264,30 +601,60 @@ service cloud.firestore {
     // ==========================================================
     // reports コレクション（通報）
     // ==========================================================
-    // 利用規約 第7条に基づく通報。通報内容と対象コンテンツのスナップショットは
-    // 運営のみが確認する（第7条2）。通報者が誰かは通報された相手に開示されない
-    // ため、read は管理者に限定し、通報者自身にも読ませない（第7条4）。
     match /reports/{reportId} {
+      function isValidReportSnapshot(s) {
+        return s is map
+          && s.size() <= 15
+          && s.keys().hasOnly([
+               'name', 'description', 'categories', 'campus', 'instagramUrl',
+               'logoUrl', 'photoUrls', 'scoutId', 'organizationName', 'body',
+               'templateId', 'templateArg', 'sentAt', 'faculty', 'grade',
+               'mainCampus', 'interests', 'iconUrl'
+             ])
+          && (!('name' in s) || (s.name is string && s.name.size() <= 200))
+          && (!('description' in s) || (s.description is string && s.description.size() <= 3000))
+          && (!('body' in s) || (s.body is string && s.body.size() <= 1000))
+          && (!('organizationName' in s) || (s.organizationName is string && s.organizationName.size() <= 200))
+          && (!('scoutId' in s) || (s.scoutId is string && s.scoutId.size() <= 128))
+          && (!('templateId' in s) || s.templateId is int)
+          && (!('templateArg' in s) || (s.templateArg is string && s.templateArg.size() <= 200))
+          && (!('sentAt' in s) || (s.sentAt is string && s.sentAt.size() <= 60))
+          && (!('campus' in s) || (s.campus is string && s.campus.size() <= 50))
+          && (!('instagramUrl' in s) || (s.instagramUrl is string && s.instagramUrl.size() <= 300))
+          && (!('logoUrl' in s) || s.logoUrl == null || (s.logoUrl is string && s.logoUrl.size() <= 2048))
+          && (!('iconUrl' in s) || s.iconUrl == null || (s.iconUrl is string && s.iconUrl.size() <= 2048))
+          && (!('faculty' in s) || (s.faculty is string && s.faculty.size() <= 100))
+          && (!('grade' in s) || s.grade is int)
+          && (!('mainCampus' in s) || (s.mainCampus is string && s.mainCampus.size() <= 50))
+          && (!('categories' in s) || (s.categories is list && s.categories.size() <= 25 && s.categories.join('').size() <= 500))
+          && (!('interests' in s) || (s.interests is list && s.interests.size() <= 30 && s.interests.join('').size() <= 1000))
+          && (!('photoUrls' in s) || (s.photoUrls is list && s.photoUrls.size() <= 6 && s.photoUrls.join('').size() <= 10000));
+      }
+
       function isValidReport() {
         let d = request.resource.data;
         return d.keys().hasAll([
                  'reporterId', 'reporterRole', 'targetType', 'targetId',
-                 'targetName', 'reason', 'detail', 'status'
+                 'targetName', 'reason', 'detail', 'status', 'createdAt'
                ])
           && d.keys().hasOnly([
                'reporterId', 'reporterRole', 'targetType', 'targetId',
                'targetName', 'reason', 'detail', 'snapshot', 'status', 'createdAt'
              ])
           && d.reporterId == request.auth.uid
-          // 自分自身は通報できない（自作自演で運営工数を消費させない）
+          && d.targetId is string && d.targetId.size() >= 1 && d.targetId.size() <= 128
           && d.targetId != request.auth.uid
-          && d.reporterRole in ['student', 'organization']
+          && d.targetName is string && d.targetName.size() >= 1 && d.targetName.size() <= 200
+          && ((d.reporterRole == 'student' && isVerifiedStudent()) ||
+              (d.reporterRole == 'organization' && isVerifiedOrg()))
           && d.targetType in ['user', 'organization']
           && d.reason in ['inappropriate_content', 'impersonation',
                           'harassment', 'dating', 'spam', 'other']
           && d.detail is string
           && d.detail.size() <= 1000
-          && d.status == 'open';
+          && (!('snapshot' in d) || isValidReportSnapshot(d.snapshot))
+          && d.status == 'open'
+          && d.createdAt is timestamp;
       }
 
       allow create: if isAuthenticated() && isValidReport();
@@ -298,10 +665,21 @@ service cloud.firestore {
     // contacts コレクション（お問い合わせ）
     // ==========================================================
     match /contacts/{docId} {
-      // 作成: 認証済みユーザーが自分のUIDを含む問い合わせのみ送信可能
-      allow create: if isAuthenticated() &&
-                    request.resource.data.userId == request.auth.uid;
-      // 読み取り・更新・削除: 管理者のみ
+      function isValidContact() {
+        let d = request.resource.data;
+        return d.keys().hasAll(['userId', 'category', 'message', 'status', 'createdAt'])
+          && d.keys().hasOnly(['userId', 'category', 'message', 'status', 'createdAt'])
+          && d.userId == request.auth.uid
+          && d.category in ['バグ報告', '機能要望', '使い方がわからない', 'その他']
+          && d.message is string
+          && d.message.size() >= 1
+          && d.message.size() <= 2000
+          && d.status == 'open'
+          && d.createdAt is timestamp;
+      }
+
+      allow create: if (isVerifiedStudent() || isOrgAccount() || isAdmin())
+        && isValidContact();
       allow read, update, delete: if isAdmin();
     }
 
@@ -309,14 +687,22 @@ service cloud.firestore {
     // tags コレクション（タグマスタ）
     // ==========================================================
     match /tags/{docId} {
-      // 認証済みユーザーなら誰でも読み取り可能
-      allow read: if isAuthenticated();
-      // タグの追加は承認済み団体または管理者のみ
-      allow create: if isVerifiedOrg() || isAdmin();
-      // 削除は管理者のみ
-      allow delete: if isAdmin();
-      // 更新は管理者のみ
-      allow update: if isAdmin();
+      function isValidTag() {
+        let d = request.resource.data;
+        return d.keys().hasAll(['name', 'createdAt'])
+          && d.keys().hasOnly(['name', 'createdAt'])
+          && d.name is string
+          && d.name.size() >= 1
+          && d.name.size() <= 100
+          && d.createdAt is timestamp;
+      }
+
+      // 認証済み学生・団体・管理者が読み取り可能
+      allow read: if isAdmin() || isVerifiedStudent() || isOrgAccount();
+      // 認証済み学生（マイページの興味タグ追加）・承認済み団体・管理者が作成可能
+      allow create: if (isVerifiedStudent() || isVerifiedOrg() || isAdmin())
+        && isValidTag();
+      allow update, delete: if isAdmin();
     }
   }
 }
