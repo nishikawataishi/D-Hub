@@ -1508,3 +1508,339 @@ test("[P1-4 強化] users.interests に空文字タグや単一で長すぎる�
   }));
 });
 
+test("[互換性8] レガシーな logoUrl / iconUrl / photoUrls や省略・nullフィールドを持つ既存団体・既存学生の転記・編集操作がすべて通る", async () => {
+  const LEGACY_ORG = "legacy_verified_org";
+  const LEGACY_STUDENT = "legacy_verified_student";
+  const MINIMAL_STUDENT = "minimal_verified_student";
+  const LEGACY_ORG_LOGO = "https://storage.googleapis.com/legacy-dscout-bucket/orgs/legacy_logo.png";
+  const LEGACY_ORG_PHOTO_1 = "https://storage.googleapis.com/legacy-dscout-bucket/orgs/photo_1.png";
+  const LEGACY_ORG_PHOTO_2 = "https://storage.googleapis.com/legacy-dscout-bucket/orgs/photo_2.png";
+  const LEGACY_USER_ICON = "https://storage.googleapis.com/legacy-dscout-bucket/users/legacy_avatar.png";
+  const LEGACY_USER_PHOTO_1 = "https://storage.googleapis.com/legacy-dscout-bucket/users/u_photo_1.png";
+  const LEGACY_USER_PHOTO_2 = "https://storage.googleapis.com/legacy-dscout-bucket/users/u_photo_2.png";
+  const futureDate = Timestamp.fromDate(new Date(Date.now() + 5 * 24 * 60 * 60 * 1000));
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, "organizations", LEGACY_ORG), {
+      name: "レガシー公認サークル",
+      description: "ルール導入前から存在する団体",
+      categories: ["sports"],
+      campus: "imadegawa",
+      logoEmoji: "🏀",
+      instagramUrl: null,
+      groupLineUrl: null,
+      logoUrl: LEGACY_ORG_LOGO,
+      photoUrls: [LEGACY_ORG_PHOTO_1, LEGACY_ORG_PHOTO_2],
+      status: "verified",
+      representativeId: LEGACY_ORG,
+      isOfficial: null,
+      createdAt: Timestamp.now(),
+    });
+    await setDoc(doc(db, "users", LEGACY_STUDENT), {
+      name: "山田 レガシー",
+      faculty: "経済学部",
+      grade: 3,
+      mainCampus: "imadegawa",
+      interests: ["バスケ", "カフェ"],
+      iconUrl: LEGACY_USER_ICON,
+      photoUrls: [LEGACY_USER_PHOTO_1, LEGACY_USER_PHOTO_2],
+      isStudentVerified: true,
+      createdAt: Timestamp.now(),
+    });
+    await setDoc(doc(db, "users", MINIMAL_STUDENT), {
+      name: "初期登録のみ学生",
+      interests: ["音楽"],
+      isStudentVerified: true,
+      createdAt: Timestamp.now(),
+    });
+  });
+
+  // 1) レガシー logoUrl を持つ既存団体による新規 events 作成（_currentOrg!.logoUrl 転記）と更新
+  const createdEventRef = await assertSucceeds(addDoc(collection(as(LEGACY_ORG), "events"), {
+    organizationId: LEGACY_ORG,
+    organizationName: "レガシー公認サークル",
+    organizationEmoji: "🏀",
+    organizationCategory: "スポーツ",
+    title: "新歓体験練習会",
+    description: "初心者大歓迎です",
+    startAt: futureDate,
+    campus: "imadegawa",
+    organizationLogoUrl: LEGACY_ORG_LOGO,
+    fee: "無料",
+    capacity: "20名",
+    location: "デイヴィス記念館",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }));
+
+  await assertSucceeds(updateDoc(doc(as(LEGACY_ORG), "events", createdEventRef.id), {
+    organizationId: LEGACY_ORG,
+    organizationName: "レガシー公認サークル",
+    organizationEmoji: "🏀",
+    organizationCategory: "スポーツ",
+    title: "新歓体験練習会（時間変更）",
+    description: "初心者大歓迎です",
+    startAt: futureDate,
+    campus: "imadegawa",
+    organizationLogoUrl: LEGACY_ORG_LOGO,
+    fee: "無料",
+    capacity: "25名",
+    location: "デイヴィス記念館",
+    updatedAt: serverTimestamp(),
+  }));
+
+  // 2) レガシー iconUrl を持つ既存学生によるイベント参加申込（student.iconUrl 転記）
+  await assertSucceeds(setDoc(
+    doc(as(LEGACY_STUDENT), "events", createdEventRef.id, "applications", LEGACY_STUDENT),
+    {
+      studentId: LEGACY_STUDENT,
+      studentName: "山田 レガシー",
+      studentFaculty: "経済学部",
+      studentGrade: 3,
+      studentIconUrl: LEGACY_USER_ICON,
+      status: "applied",
+      appliedAt: serverTimestamp(),
+    },
+  ));
+
+  // 3) レガシー logoUrl を持つ既存団体からレガシー iconUrl を持つ既存学生へのスカウト送信
+  //    （instagramUrl: null がクライアント側で '' にフォールバックして転記されるケースも含む）
+  await assertSucceeds(addDoc(collection(as(LEGACY_ORG), "scouts"), {
+    targetUserId: LEGACY_STUDENT,
+    organizationId: LEGACY_ORG,
+    organizationName: "レガシー公認サークル",
+    organizationEmoji: "🏀",
+    organizationCategory: "スポーツ",
+    templateId: 0,
+    templateArg: "バスケ",
+    isRead: false,
+    readAt: null,
+    sentAt: serverTimestamp(),
+    organizationInstagramUrl: "",
+    organizationLogoUrl: LEGACY_ORG_LOGO,
+    targetUserIconUrl: LEGACY_USER_ICON,
+    targetUserName: "山田 レガシー",
+  }));
+
+  // 4) レガシー photoUrls から1枚削除＋新規正規Storage写真を追加するプロフィール更新
+  const newScopedOrgPhoto =
+    `https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/organizations%2F${LEGACY_ORG}%2Fphotos%2Fnew_p.jpg?alt=media&token=111`;
+  await assertSucceeds(updateDoc(doc(as(LEGACY_ORG), "organizations", LEGACY_ORG), {
+    name: "レガシー公認サークル",
+    description: "写真を整理しました",
+    categories: ["sports"],
+    campus: "imadegawa",
+    logoEmoji: "🏀",
+    instagramUrl: "",
+    groupLineUrl: "",
+    logoUrl: LEGACY_ORG_LOGO,
+    photoUrls: [LEGACY_ORG_PHOTO_1, newScopedOrgPhoto],
+  }));
+
+  const newScopedUserPhoto =
+    `https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/users%2F${LEGACY_STUDENT}%2Fphotos%2Fnew_u.jpg?alt=media&token=222`;
+  const twentyTags = Array.from({ length: 20 }, (_, i) => `タグ_${i + 1}`);
+  await assertSucceeds(updateDoc(doc(as(LEGACY_STUDENT), "users", LEGACY_STUDENT), {
+    name: "山田 レガシー",
+    faculty: "経済学部",
+    grade: 3,
+    mainCampus: "imadegawa",
+    interests: twentyTags,
+    iconUrl: LEGACY_USER_ICON,
+    photoUrls: [LEGACY_USER_PHOTO_1, newScopedUserPhoto],
+  }));
+
+  // 5) mainCampus / grade 未設定で UserProfile.fromFirestore のデフォルト値（imadegawa / 1）になる学生へのスカウト送信
+  await assertSucceeds(setDoc(doc(as(LEGACY_ORG), "scouts", "scout_minimal_campus"), {
+    targetUserId: MINIMAL_STUDENT,
+    organizationId: LEGACY_ORG,
+    organizationName: "レガシー公認サークル",
+    templateId: 2,
+    templateArg: "imadegawa",
+    isRead: false,
+    sentAt: serverTimestamp(),
+  }));
+  await assertSucceeds(setDoc(doc(as(LEGACY_ORG), "scouts", "scout_minimal_grade"), {
+    targetUserId: MINIMAL_STUDENT,
+    organizationId: LEGACY_ORG,
+    organizationName: "レガシー公認サークル",
+    templateId: 3,
+    templateArg: "1",
+    isRead: false,
+    sentAt: serverTimestamp(),
+  }));
+});
+
+test("[P1-5 強化2] レガシー互換を維持しつつ、新規・変更時の不正URL注入（未登録の外部IPロガーURL等の差し込み）は確実に遮断される", async () => {
+  const LEGACY_ORG = "legacy_org_attack_test";
+  const LEGACY_STUDENT = "legacy_student_attack_test";
+  const LEGACY_ORG_LOGO = "https://storage.googleapis.com/legacy-dscout-bucket/orgs/legacy_logo.png";
+  const LEGACY_USER_ICON = "https://storage.googleapis.com/legacy-dscout-bucket/users/legacy_avatar.png";
+  const EVIL_IPLOGGER = "https://iplogger.evil.example.com/track.png";
+  const futureDate = Timestamp.fromDate(new Date(Date.now() + 5 * 24 * 60 * 60 * 1000));
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, "organizations", LEGACY_ORG), {
+      name: "レガシー検証団体",
+      status: "verified",
+      representativeId: LEGACY_ORG,
+      logoUrl: LEGACY_ORG_LOGO,
+      photoUrls: [],
+    });
+    await setDoc(doc(db, "users", LEGACY_STUDENT), {
+      name: "レガシー検証学生",
+      faculty: "法学部",
+      grade: 2,
+      mainCampus: "imadegawa",
+      interests: ["スポーツ"],
+      iconUrl: LEGACY_USER_ICON,
+      photoUrls: [],
+      isStudentVerified: true,
+    });
+    await setDoc(doc(db, "events", "legacy_org_event_1"), {
+      organizationId: LEGACY_ORG,
+      organizationName: "レガシー検証団体",
+      title: "検証イベント",
+      description: "詳細",
+      startAt: futureDate,
+      campus: "imadegawa",
+      organizationLogoUrl: LEGACY_ORG_LOGO,
+    });
+  });
+
+  // 団体プロフィールや学生プロフィールへの新規外部URL変更・写真追加は拒否
+  await assertFails(updateDoc(doc(as(LEGACY_ORG), "organizations", LEGACY_ORG), {
+    logoUrl: EVIL_IPLOGGER,
+  }));
+  await assertFails(updateDoc(doc(as(LEGACY_ORG), "organizations", LEGACY_ORG), {
+    photoUrls: [EVIL_IPLOGGER],
+  }));
+  await assertFails(updateDoc(doc(as(LEGACY_STUDENT), "users", LEGACY_STUDENT), {
+    iconUrl: EVIL_IPLOGGER,
+  }));
+  await assertFails(updateDoc(doc(as(LEGACY_STUDENT), "users", LEGACY_STUDENT), {
+    photoUrls: [EVIL_IPLOGGER],
+  }));
+
+  // events 作成・更新時に自団体の登録 logoUrl と異なる外部URLを差し込む攻撃は拒否
+  await assertFails(addDoc(collection(as(LEGACY_ORG), "events"), {
+    organizationId: LEGACY_ORG,
+    organizationName: "レガシー検証団体",
+    title: "IPロガーイベント",
+    description: "詳細",
+    startAt: futureDate,
+    campus: "imadegawa",
+    organizationLogoUrl: EVIL_IPLOGGER,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }));
+  await assertFails(updateDoc(doc(as(LEGACY_ORG), "events", "legacy_org_event_1"), {
+    organizationLogoUrl: EVIL_IPLOGGER,
+    updatedAt: serverTimestamp(),
+  }));
+
+  // applications 作成時に本人の登録 iconUrl と異なる外部URLを差し込む攻撃は拒否
+  await assertFails(setDoc(
+    doc(as(LEGACY_STUDENT), "events", "legacy_org_event_1", "applications", LEGACY_STUDENT),
+    {
+      studentId: LEGACY_STUDENT,
+      studentName: "レガシー検証学生",
+      studentFaculty: "法学部",
+      studentGrade: 2,
+      studentIconUrl: EVIL_IPLOGGER,
+      status: "applied",
+      appliedAt: serverTimestamp(),
+    },
+  ));
+
+  // scouts 作成時に登録値と異なる organizationLogoUrl や targetUserIconUrl を差し込む攻撃は拒否
+  await assertFails(setDoc(doc(as(LEGACY_ORG), "scouts", "evil_scout_org_logo"), {
+    targetUserId: LEGACY_STUDENT,
+    organizationId: LEGACY_ORG,
+    organizationName: "レガシー検証団体",
+    templateId: 4,
+    isRead: false,
+    organizationLogoUrl: EVIL_IPLOGGER,
+    sentAt: serverTimestamp(),
+  }));
+  await assertFails(setDoc(doc(as(LEGACY_ORG), "scouts", "evil_scout_target_icon"), {
+    targetUserId: LEGACY_STUDENT,
+    organizationId: LEGACY_ORG,
+    organizationName: "レガシー検証団体",
+    templateId: 4,
+    isRead: false,
+    organizationLogoUrl: LEGACY_ORG_LOGO,
+    targetUserIconUrl: EVIL_IPLOGGER,
+    sentAt: serverTimestamp(),
+  }));
+});
+
+test("[互換性9 & P1-5] instagramUrl のパス内 @ 表記および groupLineUrl の page.line.me / liff.line.me / # 付きURLを許可し、偽装ドメインは遮断する", async () => {
+  const orgDb = as(ORG_VERIFIED);
+  const futureDate = Timestamp.fromDate(new Date(Date.now() + 3 * 24 * 60 * 60 * 1000));
+
+  // 許可されるべき正規の Instagram URL（パス内 @username 表記を含む）
+  for (const validInsta of [
+    "https://www.instagram.com/@d_spirits",
+    "https://www.instagram.com/@d_spirits/",
+    "https://instagram.com/@d_spirits.2026?igsh=abc#top",
+    "instagram.com/@d_spirits",
+    "www.instagram.com/@d_spirits",
+    "https://m.instagram.com/@d_spirits",
+  ]) {
+    await assertSucceeds(updateDoc(doc(orgDb, "organizations", ORG_VERIFIED), {
+      instagramUrl: validInsta,
+    }));
+  }
+
+  // 許可されるべき正規の公式LINE・LIFF・#付きオープンチャット URL（organizations / events / scouts）
+  for (const validLine of [
+    "https://page.line.me/123abcde",
+    "https://page.line.me/@doshisha_circle",
+    "https://liff.line.me/1645278921-kWRPP32q/?accountId=123abcde",
+    "https://liff.line.me/1645278921-kWRPP32q?accountId=123abcde#about",
+    "https://line.me/ti/g2/OpenChat_123?utm_source=invitation&utm_medium=link_copy#join",
+    "https://lin.ee/AbCdEfG#open",
+  ]) {
+    await assertSucceeds(updateDoc(doc(orgDb, "organizations", ORG_VERIFIED), {
+      groupLineUrl: validLine,
+    }));
+    await assertSucceeds(addDoc(collection(orgDb, "events"), {
+      organizationId: ORG_VERIFIED,
+      organizationName: "承認済み団体",
+      title: "LINE互換確認イベント",
+      description: "詳細",
+      startAt: futureDate,
+      campus: "imadegawa",
+      groupLineUrl: validLine,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+  }
+
+  // @ やサブドメインを悪用したホスト偽装・非HTTPSフィッシングURLは引き続き遮断
+  for (const evilInsta of [
+    "https://www.instagram.com@evil.example.com/@d_spirits",
+    "https://instagram.com.evil.example.com/@d_spirits",
+    "instagram.com@evil.cc",
+  ]) {
+    await assertFails(updateDoc(doc(orgDb, "organizations", ORG_VERIFIED), {
+      instagramUrl: evilInsta,
+    }));
+  }
+
+  for (const evilLine of [
+    "https://page.line.me@evil.example.com/123abcde",
+    "https://page.line.me.evil.example.com/123abcde",
+    "https://liff.line.me.evil.example.com/1645278921",
+    "https://sub.page.line.me/123abcde",
+    "http://page.line.me/123abcde",
+  ]) {
+    await assertFails(updateDoc(doc(orgDb, "organizations", ORG_VERIFIED), {
+      groupLineUrl: evilLine,
+    }));
+  }
+});
+
