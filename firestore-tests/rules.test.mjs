@@ -2226,11 +2226,132 @@ test("[必須1・後方互換] linktr.ee・空白入りハンドル・http LINE�
       appliedAt: serverTimestamp(),
     },
   ));
+
+  // 8) 前後スペース付きのレガシー値（instagramUrl / groupLineUrl / 長文description / 長文name・faculty・title）を持つ
+  //    団体・イベント・学生が、クライアント保存時の自動 .trim() を経て更新してもデッドロックしないこと
+  const ORG_TRIM_LEGACY = "legacy_org_trim_spaces";
+  const STUDENT_TRIM_LEGACY = "legacy_student_trim_spaces";
+  const spacedLongName = `  ${"き".repeat(120)}  `;
+  const spacedLongOrgDesc = `  ${"く".repeat(2400)}\n`;
+  const fifthLegacyPhotos = Array.from(
+    { length: 5 },
+    (_, i) => `https://storage.googleapis.com/legacy-dscout/org_p_${i}.jpg`,
+  );
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, "organizations", ORG_TRIM_LEGACY), {
+      name: spacedLongName,
+      description: spacedLongOrgDesc,
+      categories: ["culture"],
+      campus: "imadegawa",
+      logoEmoji: "🎨",
+      instagramUrl: "  https://linktr.ee/spaced_legacy_org  ",
+      groupLineUrl: "  http://line.me/ti/g/spaced_legacy_line  ",
+      logoUrl: null,
+      photoUrls: fifthLegacyPhotos,
+      status: "verified",
+      representativeId: ORG_TRIM_LEGACY,
+      createdAt: Timestamp.now(),
+    });
+    await setDoc(doc(db, "events", "legacy_spaced_event"), {
+      organizationId: ORG_TRIM_LEGACY,
+      organizationName: "き".repeat(120),
+      organizationEmoji: "🎨",
+      organizationCategory: "文化系",
+      title: `  ${"け".repeat(115)}  `,
+      description: `  ${"こ".repeat(5500)}  `,
+      startAt: futureDate,
+      campus: "imadegawa",
+      fee: `  ${"さ".repeat(230)}  `,
+      capacity: `  ${"し".repeat(230)}  `,
+      location: `  ${"す".repeat(530)}  `,
+      groupLineUrl: "  http://line.me/ti/g/spaced_event_line  ",
+      createdAt: Timestamp.now(),
+    });
+    await setDoc(doc(db, "users", STUDENT_TRIM_LEGACY), {
+      name: `  ${"せ".repeat(120)}  `,
+      faculty: `  ${"そ".repeat(120)}  `,
+      grade: 3,
+      mainCampus: "imadegawa",
+      interests: ["映画"],
+      photoUrls: [],
+      isStudentVerified: true,
+      createdAt: Timestamp.now(),
+    });
+  });
+
+  // OrgProfileEditTab._saveProfile と同じく全テキスト項目を .trim() しつつ、レガシー写真5枚維持＋新規正規1枚追加
+  const sixthScopedPhoto =
+    `https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/organizations%2F${ORG_TRIM_LEGACY}%2Fphotos%2Fadded_6th.jpg?alt=media&token=6`;
+  await assertSucceeds(updateDoc(doc(as(ORG_TRIM_LEGACY), "organizations", ORG_TRIM_LEGACY), {
+    name: spacedLongName.trim(),
+    description: spacedLongOrgDesc.trim(),
+    categories: ["culture"],
+    campus: "both",
+    logoEmoji: "🎨",
+    instagramUrl: "https://linktr.ee/spaced_legacy_org",
+    groupLineUrl: "http://line.me/ti/g/spaced_legacy_line",
+    logoUrl: null,
+    photoUrls: [...fifthLegacyPhotos, sixthScopedPhoto],
+  }));
+
+  // EventEditScreen._saveEvent と同じく全テキスト項目を .trim() して更新
+  await assertSucceeds(updateDoc(doc(as(ORG_TRIM_LEGACY), "events", "legacy_spaced_event"), {
+    organizationId: ORG_TRIM_LEGACY,
+    organizationName: "き".repeat(120),
+    organizationEmoji: "🎨",
+    organizationCategory: "文化系",
+    title: "け".repeat(115),
+    description: "こ".repeat(5500),
+    startAt: futureDate,
+    campus: "both",
+    fee: "さ".repeat(230),
+    capacity: "し".repeat(230),
+    location: "す".repeat(530),
+    groupLineUrl: "http://line.me/ti/g/spaced_event_line",
+    updatedAt: serverTimestamp(),
+  }));
+
+  // ProfileEditScreen._saveProfile と同じく name / faculty を .trim() して更新
+  await assertSucceeds(updateDoc(doc(as(STUDENT_TRIM_LEGACY), "users", STUDENT_TRIM_LEGACY), {
+    name: "せ".repeat(120),
+    faculty: "そ".repeat(120),
+    grade: 4,
+    mainCampus: "kyotanabe",
+    photoUrls: [],
+  }));
+
+  // 9) レガシー長文名（300文字）や旧自由記述長文スカウト（7000文字）を持つ相手へのブロック・通報が通ること
+  const veryLongBadOrgName = "悪".repeat(300);
+  await assertSucceeds(setDoc(
+    doc(as(STUDENT), "users", STUDENT, "blocks", ORG_TRIM_LEGACY),
+    {
+      targetName: veryLongBadOrgName,
+      createdAt: serverTimestamp(),
+    },
+  ));
+  await assertSucceeds(addDoc(collection(as(STUDENT), "reports"), {
+    reporterId: STUDENT,
+    reporterRole: "student",
+    targetType: "organization",
+    targetId: ORG_TRIM_LEGACY,
+    targetName: veryLongBadOrgName,
+    reason: "spam",
+    detail: "旧形式の長文スパムスカウト通報",
+    snapshot: {
+      scoutId: "legacy_free_text_scout",
+      organizationName: veryLongBadOrgName,
+      body: "迷".repeat(7000),
+      sentAt: new Date().toISOString(),
+    },
+    status: "open",
+    createdAt: serverTimestamp(),
+  }));
 });
 
-test("[必須1＆2・境界値と申請互換] OrgCreateScreen申請updateおよび文字数境界値（2000/2001、5000/5001、スカウトSNS型不正）の検証", async () => {
+test("[必須2・申請互換] OrgCreateScreen.saveOrganization による申請 update（verifiedAt: null・ISO日時 createdAt・proofImageUrl）が通る", async () => {
   const ORG_SIGNUP_TEMP = "org_signup_temp_uid";
-  const futureDate = Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
 
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), "organizations", ORG_SIGNUP_TEMP), {
@@ -2249,33 +2370,61 @@ test("[必須1＆2・境界値と申請互換] OrgCreateScreen申請updateおよ
     });
   });
 
-  // 1) サインアップ直後の仮ドキュメントに対して OrgCreateScreen.saveOrganization と同等の申請 update が通る
+  // サインアップ直後の仮ドキュメントに対して OrgCreateScreen.saveOrganization と同等の申請 update が通る
+  // （Dart ローカル時刻のマイクロ秒6桁・タイムゾーンなし ISO 8601 形式および UTC Z 付き形式の両方を検証）
   const proofUrl =
     `https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/organizations%2F${ORG_SIGNUP_TEMP}%2Fphotos%2Fproof_1.jpg?alt=media&token=abc`;
-  await assertSucceeds(setDoc(
-    doc(as(ORG_SIGNUP_TEMP), "organizations", ORG_SIGNUP_TEMP),
-    {
-      id: ORG_SIGNUP_TEMP,
-      name: "新規申請バドミントンサークル",
-      description: "審査後にプロフィールを編集できます。",
-      categories: ["sports", "beginner"],
+  for (const validDartIso of [
+    "2026-04-18T12:34:56.789012",
+    new Date().toISOString(),
+  ]) {
+    await assertSucceeds(setDoc(
+      doc(as(ORG_SIGNUP_TEMP), "organizations", ORG_SIGNUP_TEMP),
+      {
+        id: ORG_SIGNUP_TEMP,
+        name: "新規申請バドミントンサークル",
+        description: "審査後にプロフィールを編集できます。",
+        categories: ["sports", "beginner"],
+        campus: "both",
+        logoEmoji: "🎨",
+        instagramUrl: "https://www.instagram.com/doshisha_badminton/",
+        groupLineUrl: "",
+        logoUrl: null,
+        representativeId: ORG_SIGNUP_TEMP,
+        status: "pending",
+        proofImageUrl: proofUrl,
+        verifiedAt: null,
+        isOfficial: false,
+        createdAt: validDartIso,
+        photoUrls: [],
+      },
+      { merge: true },
+    ));
+  }
+});
+
+test("[必須1＆2・境界値遮断] 文字数境界値（2000/2001、5000/5001）、スカウトSNS型不正、および非ISO文字列 createdAt による管理画面クラッシュ攻撃の遮断", async () => {
+  const ORG_PENDING_ATTACKER = "org_pending_iso_attacker";
+  const futureDate = Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "organizations", ORG_PENDING_ATTACKER), {
+      name: "団体名未設定",
+      description: "",
+      categories: ["culture"],
       campus: "both",
       logoEmoji: "🎨",
-      instagramUrl: "https://www.instagram.com/doshisha_badminton/",
+      instagramUrl: "",
       groupLineUrl: "",
-      logoUrl: null,
-      representativeId: ORG_SIGNUP_TEMP,
-      status: "pending",
-      proofImageUrl: proofUrl,
-      verifiedAt: null,
       isOfficial: false,
-      createdAt: new Date().toISOString(),
       photoUrls: [],
-    },
-    { merge: true },
-  ));
+      status: "pending",
+      representativeId: ORG_PENDING_ATTACKER,
+      createdAt: Timestamp.now(),
+    });
+  });
 
-  // 2) organizations.description の境界値: 0文字・2000文字は許可、2001文字への新規変更は拒否
+  // 1) organizations.description の境界値: 0文字・2000文字は許可、2001文字への新規変更は拒否
   await assertSucceeds(updateDoc(doc(as(ORG_VERIFIED), "organizations", ORG_VERIFIED), {
     description: "",
   }));
@@ -2286,7 +2435,7 @@ test("[必須1＆2・境界値と申請互換] OrgCreateScreen申請updateおよ
     description: "あ".repeat(2001),
   }));
 
-  // 3) events.description の境界値: 0文字・5000文字は許可、5001文字は拒否
+  // 2) events.description の境界値: 0文字・5000文字は許可、5001文字は拒否
   await assertSucceeds(addDoc(collection(as(ORG_VERIFIED), "events"), {
     organizationId: ORG_VERIFIED,
     organizationName: "承認済み団体",
@@ -2308,7 +2457,7 @@ test("[必須1＆2・境界値と申請互換] OrgCreateScreen申請updateおよ
     updatedAt: serverTimestamp(),
   }));
 
-  // 4) scouts の organizationInstagramUrl / organizationGroupLineUrl に非string型は設定不可
+  // 3) scouts の organizationInstagramUrl / organizationGroupLineUrl に非string型は設定不可
   await assertFails(addDoc(collection(as(ORG_VERIFIED), "scouts"), {
     targetUserId: STUDENT,
     organizationId: ORG_VERIFIED,
@@ -2318,6 +2467,30 @@ test("[必須1＆2・境界値と申請互換] OrgCreateScreen申請updateおよ
     sentAt: serverTimestamp(),
     organizationInstagramUrl: 12345,
   }));
+
+  // 4) DateTime.parse で FormatException を起こし AdminDashboardScreen をクラッシュさせる非ISO文字列 createdAt を遮断（create / pending update 両方）
+  for (const invalidDateStr of [
+    "not-a-valid-date",
+    "2026-13-45T99:99:99Z",
+    "2026/04/18 12:00:00",
+    "",
+  ]) {
+    await assertFails(setDoc(
+      doc(as("new_bad_date_org"), "organizations", "new_bad_date_org"),
+      {
+        name: "不正日時団体",
+        status: "pending",
+        representativeId: "new_bad_date_org",
+        createdAt: invalidDateStr,
+      },
+    ));
+    await assertFails(updateDoc(
+      doc(as(ORG_PENDING_ATTACKER), "organizations", ORG_PENDING_ATTACKER),
+      {
+        createdAt: invalidDateStr,
+      },
+    ));
+  }
 });
 
 test("[必須1・攻撃遮断] レガシー値維持を許可しても、別の不正URL・制限超え長文への書き換えやスカウト裏URL差し込みは遮断される", async () => {
@@ -2331,8 +2504,8 @@ test("[必須1・攻撃遮断] レガシー値維持を許可しても、別の�
       categories: ["sports"],
       campus: "imadegawa",
       logoEmoji: "🏀",
-      instagramUrl: "https://linktr.ee/original_circle",
-      groupLineUrl: "http://line.me/ti/g/original_legacy",
+      instagramUrl: "  https://linktr.ee/original_circle  ",
+      groupLineUrl: "  http://line.me/ti/g/original_legacy  ",
       status: "verified",
       representativeId: ORG_LEGACY_STRICT,
       verifiedAt: Timestamp.now(),
@@ -2340,9 +2513,12 @@ test("[必須1・攻撃遮断] レガシー値維持を許可しても、別の�
     });
   });
 
-  // 1) 既存の linktr.ee から「別の」linktr.ee や外部サイトへの変更は拒否
+  // 1) 前後スペース付きの既存 linktr.ee を持っていても、「別の」linktr.ee や空団体名への変更は拒否
   await assertFails(updateDoc(doc(as(ORG_LEGACY_STRICT), "organizations", ORG_LEGACY_STRICT), {
     instagramUrl: "https://linktr.ee/modified_other_link",
+  }));
+  await assertFails(updateDoc(doc(as(ORG_LEGACY_STRICT), "organizations", ORG_LEGACY_STRICT), {
+    name: "",
   }));
 
   // 2) 既存の http:// LINE URL から「別の」http:// URL への変更は拒否
@@ -2428,6 +2604,22 @@ test("[必須1・攻撃遮断] レガシー値維持を許可しても、別の�
     interests: twentyNewInterests,
     iconUrl: VALID_STORAGE_USER_ICON,
     photoUrls: sixNewStudentPhotos,
+  }));
+
+  // 8) 複数枚の photoUrls の途中の1枚だけに %2F サブ階層細工や外部URLが混入していても確実に遮断されること
+  await assertFails(updateDoc(doc(as(ORG_LEGACY_STRICT), "organizations", ORG_LEGACY_STRICT), {
+    photoUrls: [
+      sixNewOrgPhotos[0],
+      `https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/organizations%2F${ORG_LEGACY_STRICT}%2Fphotos%2Fnested%2Fevil.jpg?alt=media`,
+      sixNewOrgPhotos[2],
+    ],
+  }));
+  await assertFails(updateDoc(doc(as(STUDENT), "users", STUDENT), {
+    photoUrls: [
+      sixNewStudentPhotos[0],
+      `https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/users%2F${STUDENT}%2Fphotos%2Fnested%2Fevil.jpg?alt=media`,
+      sixNewStudentPhotos[2],
+    ],
   }));
 });
 

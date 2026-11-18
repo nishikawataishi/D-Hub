@@ -587,6 +587,9 @@ async function cleanupRelatedAccountData(uid, { cleanStudentData, cleanOrgData }
                 chunk.map((d) => db.recursiveDelete(d.ref, bulkWriter)),
             );
         }
+
+        // 団体削除後に同一UIDで再作成・再申請された場合に通知が重複抑止されないよう審査通知記録も削除
+        bulkWriter.delete(db.collection("admin_notifications").doc(`org_${uid}`));
     }
 
     // 他人が対象UIDをブロックしている記録の削除
@@ -599,23 +602,33 @@ async function cleanupRelatedAccountData(uid, { cleanStudentData, cleanOrgData }
     await bulkWriter.close();
 
     // Storage 画像の一括削除（force: true および 404 無視で冪等性を担保）
-    // ※ADC 未設定のオフラインエミュレータ環境ではデフォルトバケットが <projectId>.appspot.com に
-    //   フォールバックするため、エミュレータ実行時は .firebasestorage.app バケットも併せて削除対象にする
+    // ※ADC 未設定環境やエミュレータ環境ではデフォルトバケットが未指定または <projectId>.appspot.com に
+    //   フォールバックする場合があるため、例外を安全に吸収しつつ .firebasestorage.app バケットも確実に網羅する
     const prefixes = [];
     if (cleanStudentData) prefixes.push(`users/${uid}/`);
     if (cleanOrgData) prefixes.push(`organizations/${uid}/`);
 
     const storage = getStorage();
-    const defaultBucket = storage.bucket();
-    const targetBuckets = [defaultBucket];
-    if (
-        process.env.FUNCTIONS_EMULATOR === "true" &&
-        process.env.GCLOUD_PROJECT &&
-        defaultBucket.name !== `${process.env.GCLOUD_PROJECT}.firebasestorage.app`
-    ) {
-        targetBuckets.push(
-            storage.bucket(`${process.env.GCLOUD_PROJECT}.firebasestorage.app`),
-        );
+    const targetBuckets = [];
+    const seenBucketNames = new Set();
+    try {
+        const defaultBucket = storage.bucket();
+        if (defaultBucket && defaultBucket.name) {
+            seenBucketNames.add(defaultBucket.name);
+            targetBuckets.push(defaultBucket);
+        }
+    } catch (_) {
+        // デフォルトバケット未指定環境ではプロジェクトIDからの明示バケット名解決へフォールバックする
+    }
+
+    const projectId =
+        process.env.GCLOUD_PROJECT || admin.app().options?.projectId;
+    if (projectId) {
+        const appBucketName = `${projectId}.firebasestorage.app`;
+        if (!seenBucketNames.has(appBucketName)) {
+            seenBucketNames.add(appBucketName);
+            targetBuckets.push(storage.bucket(appBucketName));
+        }
     }
 
     for (const bucket of targetBuckets) {
@@ -1009,7 +1022,10 @@ async function sendAdminAlertOnce({
             typeof rateData.hourSentCount === "number"
                 ? rateData.hourSentCount
                 : 0;
-        if (nowMs - hourWindowStartMs >= ONE_HOUR_MS) {
+        if (
+            nowMs - hourWindowStartMs >= ONE_HOUR_MS ||
+            hourWindowStartMs > nowMs + ONE_HOUR_MS
+        ) {
             hourWindowStartMs = nowMs;
             hourSentCount = 0;
         }
@@ -1022,7 +1038,10 @@ async function sendAdminAlertOnce({
             typeof rateData.daySentCount === "number"
                 ? rateData.daySentCount
                 : 0;
-        if (nowMs - dayWindowStartMs >= ONE_DAY_MS) {
+        if (
+            nowMs - dayWindowStartMs >= ONE_DAY_MS ||
+            dayWindowStartMs > nowMs + ONE_DAY_MS
+        ) {
             dayWindowStartMs = nowMs;
             daySentCount = 0;
         }
@@ -1086,6 +1105,8 @@ async function sendAdminAlertOnce({
             action: "send",
             priorSuppressedCount: suppressedCount,
             isReachingLimitNow,
+            hourWindowStartMs,
+            dayWindowStartMs,
         };
     });
 
@@ -1106,10 +1127,10 @@ async function sendAdminAlertOnce({
     const extraHtmlNotes = [];
     if (decision.priorSuppressedCount > 0) {
         extraTextNotes.push(
-            `※直前の流量制限中に他 ${decision.priorSuppressedCount} 件の通知メールが省略されています。管理画面で未確認の項目をすべて確認してください。`,
+            `※直前の流量制限等により他 ${decision.priorSuppressedCount} 件の通知メールが省略されています。管理画面で未確認の項目をすべて確認してください。`,
         );
         extraHtmlNotes.push(
-            `<p style="padding: 10px; background: #fff8e1; border-left: 4px solid #f9a825; font-size: 13px;">※直前の流量制限中に他 <strong>${decision.priorSuppressedCount}件</strong> の通知メールが省略されています。管理画面で未確認の項目をすべて確認してください。</p>`,
+            `<p style="padding: 10px; background: #fff8e1; border-left: 4px solid #f9a825; font-size: 13px;">※直前の流量制限等により他 <strong>${decision.priorSuppressedCount}件</strong> の通知メールが省略されています。管理画面で未確認の項目をすべて確認してください。</p>`,
         );
     }
     if (decision.isReachingLimitNow) {
@@ -1152,6 +1173,41 @@ async function sendAdminAlertOnce({
             status: "failed",
             errorMessage: String(error.message || error),
         });
+        // SMTP送信失敗時は管理者にメールが届いていないため、消費した送信枠を返却しつつ
+        // 直前の省略件数＋今回の未配信1件分を次回成功時のメールへ引き継ぐ
+        await db
+            .runTransaction(async (tx) => {
+                const snap = await tx.get(rateLimitRef);
+                if (!snap.exists) return;
+                const d = snap.data() || {};
+                const curHourCount =
+                    typeof d.hourSentCount === "number" ? d.hourSentCount : 0;
+                const curDayCount =
+                    typeof d.daySentCount === "number" ? d.daySentCount : 0;
+                const curSuppressed =
+                    typeof d.suppressedSinceLastEmail === "number"
+                        ? d.suppressedSinceLastEmail
+                        : 0;
+                tx.update(rateLimitRef, {
+                    hourSentCount:
+                        d.hourWindowStartMs === decision.hourWindowStartMs
+                            ? Math.max(0, curHourCount - 1)
+                            : curHourCount,
+                    daySentCount:
+                        d.dayWindowStartMs === decision.dayWindowStartMs
+                            ? Math.max(0, curDayCount - 1)
+                            : curDayCount,
+                    suppressedSinceLastEmail:
+                        curSuppressed + decision.priorSuppressedCount + 1,
+                    updatedAt: FieldValue.serverTimestamp(),
+                });
+            })
+            .catch((rollbackErr) => {
+                logger.error(
+                    `Failed to rollback rate limit counter after SMTP error: id=${notificationId}`,
+                    rollbackErr,
+                );
+            });
         logger.error(`Failed to send admin alert: id=${notificationId}`, error);
     }
 }
@@ -1220,8 +1276,12 @@ exports.onReportCreated = onDocumentCreated(
 );
 
 /**
- * 団体アカウントの審査申請（proofImageUrl が初めて設定された update または直接 create）が行われた際に運営へメール通知する。
- * サインアップ時の仮ドキュメント（name: '団体名未設定', proofImageUrl 未設定）では通知しない。
+ * 団体アカウントの本申請が行われた際に運営へメール通知する。
+ * - サインアップ直後の仮ドキュメント（name: '団体名未設定', description: '', proofImageUrl 未設定）では通知しない。
+ * - 以下のいずれかの初回提出で通知する:
+ *   1) OrgCreateScreen 等から proofImageUrl が空→非空として初めて設定された書き込み（update / 直接 create）
+ *   2) 現行公開版アプリのサインアップ導線（仮ドキュメント作成 → OrgProfileEditTab）で、
+ *      仮状態（name === '団体名未設定'）から実団体名＋紹介文が初めて保存された update
  */
 exports.onOrganizationApplicationSubmitted = onDocumentWritten(
     {
@@ -1230,6 +1290,7 @@ exports.onOrganizationApplicationSubmitted = onDocumentWritten(
         maxInstances: 5,
     },
     async (event) => {
+        const { orgId } = event.params;
         const beforeData = event.data?.before?.data();
         const afterData = event.data?.after?.data();
 
@@ -1250,41 +1311,75 @@ exports.onOrganizationApplicationSubmitted = onDocumentWritten(
                 ? afterData.proofImageUrl.trim()
                 : "";
 
-        // proofImageUrl が未設定（空）から初めて設定された書き込みのみを通知契機とする
-        if (beforeProofUrl.length > 0 || afterProofUrl.length === 0) {
+        const beforeName =
+            typeof beforeData?.name === "string" ? beforeData.name.trim() : "";
+        const afterName =
+            typeof afterData.name === "string" ? afterData.name.trim() : "";
+        const afterDescription =
+            typeof afterData.description === "string"
+                ? afterData.description.trim()
+                : "";
+
+        // サインアップ直後の仮ドキュメント新規作成時は通知せず、万一過去の削除残骸通知があればクリアする
+        if (!beforeData && afterProofUrl.length === 0 && afterName === "団体名未設定") {
+            await db
+                .collection("admin_notifications")
+                .doc(`org_${orgId}`)
+                .delete()
+                .catch(() => {});
             return;
         }
 
-        const { orgId } = event.params;
+        const isFirstProofSubmission =
+            beforeProofUrl.length === 0 && afterProofUrl.length > 0;
+        const isFirstProfileSubmissionFromPlaceholder =
+            afterProofUrl.length === 0 &&
+            Boolean(beforeData) &&
+            beforeName === "団体名未設定" &&
+            afterName.length > 0 &&
+            afterName !== "団体名未設定" &&
+            afterDescription.length > 0;
+
+        if (!isFirstProofSubmission && !isFirstProfileSubmissionFromPlaceholder) {
+            return;
+        }
+
         const cleanOrgName = sanitizeSingleLine(afterData.name || "団体名未設定");
         const cleanCampus = sanitizeSingleLine(afterData.campus || "未設定");
         const cleanInstagram = sanitizeSingleLine(
             afterData.instagramUrl || "（未入力）",
         );
+        const proofStatusLabel =
+            afterProofUrl.length > 0
+                ? "提出あり（管理画面で確認してください）"
+                : "未添付（プロフィール編集タブからの申請）";
         const safeOrgName = escapeHtml(cleanOrgName || "団体名未設定");
         const safeCampus = escapeHtml(cleanCampus || "未設定");
         const safeInstagram = escapeHtml(cleanInstagram || "（未入力）");
+        const safeProofStatus = escapeHtml(proofStatusLabel);
 
         const subject = `【D-Hub 審査依頼】団体作成の申請が提出されました（${cleanOrgName || "団体名未設定"}）`;
         const textBody = [
-            "D-Hub で団体アカウントの活動証明画像が提出されました（ステータス: pending）。",
-            "管理画面の「団体管理」タブから証明画像・活動内容を確認し、24時間以内に承認・却下の審査を行ってください。",
+            "D-Hub で団体アカウントの審査申請が提出されました（ステータス: pending）。",
+            "管理画面の「団体管理」タブから活動内容・証明画像等を確認し、24時間以内に承認・却下の審査を行ってください。",
             "",
             `団体UID: ${orgId}`,
             `団体名: ${cleanOrgName || "団体名未設定"}`,
             `キャンパス: ${cleanCampus || "未設定"}`,
             `Instagram: ${cleanInstagram || "（未入力）"}`,
+            `証明画像: ${proofStatusLabel}`,
         ].join("\n");
 
         const htmlBody = `
         <div style="font-family: sans-serif; color: #333;">
             <h2>【D-Hub】団体審査申請のお知らせ</h2>
-            <p>活動証明画像付きの団体申請が提出されました。管理画面から実在確認・審査を行ってください。</p>
+            <p>団体アカウントの審査申請が提出されました。管理画面から実在確認・審査を行ってください。</p>
             <ul>
                 <li><strong>団体UID:</strong> <code>${escapeHtml(orgId)}</code></li>
                 <li><strong>団体名:</strong> ${safeOrgName}</li>
                 <li><strong>キャンパス:</strong> ${safeCampus}</li>
                 <li><strong>Instagram:</strong> ${safeInstagram}</li>
+                <li><strong>証明画像:</strong> ${safeProofStatus}</li>
             </ul>
         </div>
         `;

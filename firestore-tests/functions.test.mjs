@@ -610,6 +610,104 @@ test("[P3-4] 新規通報および団体証明画像の初回提出（update / �
   const verifiedNote = await adminDb.collection("admin_notifications").doc(`org_${verifiedOrgId}`).get();
   assert.equal(blankNote.exists, false, "空白のみの proofImageUrl で通知が誤発火しています");
   assert.equal(verifiedNote.exists, false, "status=verified の団体で審査通知が誤発火しています");
+
+  // 4) 現行公開版アプリの通常サインアップ導線（仮ドキュメント作成 → ロゴ先行アップ → OrgProfileEditTab 保存）の検証
+  const profileFlowOrgId = "p34_profile_edit_tab_org";
+  await loginTestUser(profileFlowOrgId, "profile-flow-org@example.com");
+  await signOut(clientAuth);
+
+  // 4-a) AuthNotifier._createUserDocument と同等の仮ドキュメント作成 → 非発火
+  await adminDb.collection("organizations").doc(profileFlowOrgId).set({
+    name: "団体名未設定",
+    description: "",
+    categories: ["culture"],
+    campus: "both",
+    logoEmoji: "🎨",
+    instagramUrl: "",
+    groupLineUrl: "",
+    isOfficial: false,
+    photoUrls: [],
+    status: "pending",
+    representativeId: profileFlowOrgId,
+    createdAt: new Date(),
+  });
+  await new Promise((r) => setTimeout(r, 600));
+  assert.equal(
+    (await adminDb.collection("admin_notifications").doc(`org_${profileFlowOrgId}`).get()).exists,
+    false,
+    "サインアップ直後の仮ドキュメントで通知が誤発火しています",
+  );
+
+  // 4-b) 団体名入力前にロゴ画像だけ先行アップロード（name: '団体名未設定' のまま）→ まだ非発火
+  await adminDb.collection("organizations").doc(profileFlowOrgId).update({
+    logoUrl:
+      `https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/organizations%2F${profileFlowOrgId}%2Flogo%2Flogo.jpg?alt=media&token=1`,
+  });
+  await new Promise((r) => setTimeout(r, 600));
+  assert.equal(
+    (await adminDb.collection("admin_notifications").doc(`org_${profileFlowOrgId}`).get()).exists,
+    false,
+    "団体名未設定のままロゴだけ更新した段階で通知が誤発火しています",
+  );
+
+  // 4-c) OrgProfileEditTab._saveProfile と同等の初回プロフィール保存（proofImageUrl なし）→ 実団体名で通知発火
+  await adminDb.collection("organizations").doc(profileFlowOrgId).update({
+    name: "同志社写真サークル",
+    description: "週末に京都の寺社仏閣で撮影会を行っています！",
+    categories: ["culture", "beginner"],
+    campus: "imadegawa",
+    logoEmoji: "🎨",
+    instagramUrl: "@doshisha_photo_club",
+    groupLineUrl: "",
+    photoUrls: [],
+  });
+  const profileFlowNotified = await waitForCondition(async () => {
+    const snap = await adminDb.collection("admin_notifications").doc(`org_${profileFlowOrgId}`).get();
+    return snap.exists;
+  });
+  assert.equal(
+    profileFlowNotified,
+    true,
+    "現行公開版アプリの OrgProfileEditTab 初回保存導線で審査通知が記録されませんでした",
+  );
+  const profileFlowNote = (
+    await adminDb.collection("admin_notifications").doc(`org_${profileFlowOrgId}`).get()
+  ).data();
+  assert.ok(profileFlowNote.subject.includes("同志社写真サークル"));
+
+  // 4-d) 管理者削除後に同一UIDで再サインアップ→再申請された場合、古い通知記録に阻害されず再通知されること
+  await adminDb.collection("organizations").doc(profileFlowOrgId).delete();
+  const prevNotificationCleared = await waitForCondition(async () => {
+    const snap = await adminDb.collection("admin_notifications").doc(`org_${profileFlowOrgId}`).get();
+    return !snap.exists;
+  });
+  assert.equal(prevNotificationCleared, true, "団体削除時に org_${uid} 通知記録がクリーンアップされていません");
+
+  await adminDb.collection("_admin_alert_rate_limits").doc("global").delete();
+  await adminDb.collection("organizations").doc(profileFlowOrgId).set({
+    name: "団体名未設定",
+    description: "",
+    categories: ["culture"],
+    campus: "both",
+    logoEmoji: "🎨",
+    instagramUrl: "",
+    groupLineUrl: "",
+    isOfficial: false,
+    photoUrls: [],
+    status: "pending",
+    representativeId: profileFlowOrgId,
+    createdAt: new Date(),
+  });
+  await new Promise((r) => setTimeout(r, 500));
+  await adminDb.collection("organizations").doc(profileFlowOrgId).update({
+    name: "同志社写真サークル（再申請）",
+    description: "活動写真を整えて再申請しました",
+  });
+  const reappliedNotified = await waitForCondition(async () => {
+    const snap = await adminDb.collection("admin_notifications").doc(`org_${profileFlowOrgId}`).get();
+    return snap.exists && snap.data()?.subject?.includes("再申請");
+  });
+  assert.equal(reappliedNotified, true, "削除後の再申請で審査通知が再発火しませんでした");
 });
 
 test("[必須2・流量制限] 運営通知メールが短時間に大量発生しても1時間あたりの上限件数で制限され、学生認証コード配信を阻害しない", async () => {
@@ -778,6 +876,24 @@ test("[必須2・本番SMTP経路] 専用SMTPアカウント優先切替・フ�
         },
       });
 
+      // 3) SMTP復旧後の次回通知で、直前の送信エラー分が省略件数（1件）として漏れなく引き継がれ送信枠も戻っていること
+      shouldFailSend = false;
+      await fn.onReportCreated.run({
+        params: { reportId: "prod_smtp_after_fail_recovery" },
+        data: {
+          data: () => ({
+            reporterId: "st_2",
+            reporterRole: "student",
+            targetType: "organization",
+            targetId: "org_2",
+            targetName: "SMTP復旧後通報対象",
+            reason: "harassment",
+            detail: "SMTPエラー直後の復旧確認",
+            status: "open",
+          }),
+        },
+      });
+
       console.log("__RESULT__" + JSON.stringify({ transportConfigs, sentMessages }));
     })().catch((e) => {
       console.error(e);
@@ -795,7 +911,7 @@ test("[必須2・本番SMTP経路] 専用SMTPアカウント優先切替・フ�
 
   // 1通目は専用SMTP（admin-dedicated@example.com）が使われていること
   assert.equal(transportConfigs[0].auth.user, "admin-dedicated@example.com");
-  assert.equal(sentMessages.length, 1);
+  assert.equal(sentMessages.length, 2);
   assert.ok(sentMessages[0].from.includes("admin-dedicated@example.com"));
   assert.equal(sentMessages[0].to, "ops-inbox@example.com");
   assert.ok(sentMessages[0].text.includes("2 件の通知メールが省略されています"));
@@ -810,6 +926,17 @@ test("[必須2・本番SMTP経路] 専用SMTPアカウント優先切替・フ�
   const failSnap = await adminDb.collection("admin_notifications").doc("org_prod_smtp_fail_org").get();
   assert.equal(failSnap.data().status, "failed");
   assert.ok(failSnap.data().errorMessage.includes("Simulated SMTP 421 quota error"));
+
+  // 3通目（SMTP復旧後）は2通目の未配信分（1件）を省略件数として引き継ぎ、hourSentCount も 1（失敗分は返却済み）になっていること
+  assert.ok(
+    sentMessages[1].text.includes("1 件の通知メールが省略されています"),
+    `SMTP失敗後の復旧メールに未配信件数が引き継がれていません: ${sentMessages[1].text}`,
+  );
+  const rateAfterRecovery = (
+    await adminDb.collection("_admin_alert_rate_limits").doc("global").get()
+  ).data();
+  assert.equal(rateAfterRecovery.hourSentCount, 1);
+  assert.equal(rateAfterRecovery.suppressedSinceLastEmail, 0);
 });
 
 // ============================================================================
