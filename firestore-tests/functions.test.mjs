@@ -397,16 +397,22 @@ test("[P2-4b] 管理画面からの団体削除（organizations/{id} 削除）�
   assert.equal(cleaned, true, "団体削除後に Auth アカウントまたは関連データが残存しています");
 });
 
-test("[P2-4c] 管理画面からの学生削除（users/{id} 削除 + deleteAuthUser 呼び出し）が競合エラーなく関連データを一掃する", async () => {
+test("[P2-4c] 管理画面からの学生削除（users/{id} 削除 + deleteAuthUser 呼び出し）が競合エラーなく関連データと大学メールロックを一掃する", async () => {
   const studentUid = "p24_deleted_student";
-  await loginTestUser(studentUid, "del-student@mail.doshisha.ac.jp");
+  const studentEmail = "del-student@mail.doshisha.ac.jp";
+  const emailLockId = crypto.createHash("sha256").update(studentEmail).digest("hex");
+  await loginTestUser(studentUid, studentEmail);
 
   await adminDb.collection("users").doc(studentUid).set({
     name: "削除対象学生",
     isStudentVerified: true,
   });
   await adminDb.collection("users").doc(studentUid).collection("private").doc("verification").set({
-    universityEmail: "del-student@mail.doshisha.ac.jp",
+    universityEmail: studentEmail,
+  });
+  await adminDb.collection("university_email_locks").doc(emailLockId).set({
+    uid: studentUid,
+    verifiedAt: new Date(),
   });
   await adminDb.collection("scouts").doc("scout_to_del_student").set({
     organizationId: "some_org",
@@ -424,10 +430,11 @@ test("[P2-4c] 管理画面からの学生削除（users/{id} 削除 + deleteAuth
 
   const cleaned = await waitForCondition(async () => {
     const privDoc = await adminDb.collection("users").doc(studentUid).collection("private").doc("verification").get();
+    const lockDoc = await adminDb.collection("university_email_locks").doc(emailLockId).get();
     const scoutDoc = await adminDb.collection("scouts").doc("scout_to_del_student").get();
-    return !privDoc.exists && !scoutDoc.exists;
+    return !privDoc.exists && !lockDoc.exists && !scoutDoc.exists;
   });
-  assert.equal(cleaned, true, "学生削除後に private/verification またはスカウトが残存しています");
+  assert.equal(cleaned, true, "学生削除後に private/verification・university_email_locks・スカウトのいずれかが残存しています");
 });
 
 // ============================================================================
