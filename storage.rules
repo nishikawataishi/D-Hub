@@ -10,12 +10,47 @@ service firebase.storage {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isAdmin() {
+      return isAuthenticated() &&
+        'admin' in request.auth.token &&
+        request.auth.token.admin == true;
+    }
+
+    // 学生の第2層認証（大学メール確認コード検証）が完了しているかチェック
+    function isVerifiedStudent() {
+      return isAuthenticated() &&
+        firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('isStudentVerified', false) == true;
+    }
+
+    // 団体アカウント（審査待ち・却下・承認済みすべて含む）が存在するかチェック
+    function isOrgAccount() {
+      return isAuthenticated() &&
+        firestore.exists(/databases/(default)/documents/organizations/$(request.auth.uid));
+    }
+
+    // 呼び出し元の団体が審査承認済みかチェック
+    function isVerifiedOrg() {
+      return isAuthenticated() &&
+        firestore.exists(/databases/(default)/documents/organizations/$(request.auth.uid)) &&
+        firestore.get(/databases/(default)/documents/organizations/$(request.auth.uid)).data.get('status', '') == 'verified';
+    }
+
+    // 読み取り対象の団体が審査承認済みかチェック
+    function isTargetOrgVerified(orgId) {
+      return firestore.exists(/databases/(default)/documents/organizations/$(orgId)) &&
+        firestore.get(/databases/(default)/documents/organizations/$(orgId)).data.get('status', '') == 'verified';
+    }
+
     function isImage() {
-      return request.resource.contentType.matches('image/.*');
+      return request.resource != null &&
+        request.resource.contentType != null &&
+        request.resource.contentType.matches('image/.*');
     }
 
     function isLessThan5MB() {
-      return request.resource.size < 5 * 1024 * 1024;
+      return request.resource != null &&
+        request.resource.size < 5 * 1024 * 1024;
     }
 
     // ⚠️ delete のルールに isImage() / isLessThan5MB() を含めてはいけない。
@@ -24,27 +59,57 @@ service firebase.storage {
     // allow write で書いていたため、退会時もアイコン差し替え時も画像が
     // 一切消えず Storage に残り続けていた。
 
-    // ユーザーアイコン
+    // ユーザーアイコン（一般ユーザーの listAll による過去ファイル列挙は禁止し get のみ許可）
     match /users/{userId}/icon/{fileName} {
-      allow read: if isAuthenticated();
-      allow create, update: if isOwner(userId) && isImage() && isLessThan5MB();
-      allow delete: if isOwner(userId);
+      allow get: if isAdmin()
+        || isVerifiedStudent()
+        || isVerifiedOrg();
+      allow list: if isAdmin();
+      allow create, update: if isOwner(userId)
+        && isVerifiedStudent()
+        && fileName.size() <= 200
+        && isImage()
+        && isLessThan5MB();
+      allow delete: if isAdmin() || isOwner(userId);
     }
 
-    // ユーザープロフィール写真（ギャラリー用）
+    // ユーザープロフィール写真（ギャラリー用・一般ユーザーの listAll 列挙は禁止）
     match /users/{userId}/photos/{fileName} {
-      allow read: if isAuthenticated();
-      allow create, update: if isOwner(userId) && isImage() && isLessThan5MB();
-      allow delete: if isOwner(userId);
+      allow get: if isAdmin()
+        || isVerifiedStudent()
+        || isVerifiedOrg();
+      allow list: if isAdmin();
+      allow create, update: if isOwner(userId)
+        && isVerifiedStudent()
+        && fileName.size() <= 200
+        && isImage()
+        && isLessThan5MB();
+      allow delete: if isAdmin() || isOwner(userId);
     }
 
-    // 団体ロゴ・活動写真
+    // 団体ロゴ・活動写真・活動証明画像
     match /organizations/{orgId}/{folder}/{fileName} {
-      // 誰でも読み取れる
-      allow read: if isAuthenticated();
-      // orgIdとユーザーIDが一致する場合のみアップロード可能（5MB以下の画像のみ）
-      allow create, update: if isOwner(orgId) && isImage() && isLessThan5MB();
-      allow delete: if isOwner(orgId);
+      // 個別取得（get）:
+      // - 管理者（審査用の証明画像を含む全ファイル）
+      // - 団体オーナー本人（審査中・却下団体がアップロード直後に getDownloadURL する経路を含む）
+      // - 承認済み団体の logo / photos に対する認証済み学生・承認済み団体
+      allow get: if isAdmin()
+        || (isOwner(orgId) && isOrgAccount())
+        || ((isVerifiedStudent() || isVerifiedOrg())
+            && isTargetOrgVerified(orgId)
+            && folder in ['logo', 'photos']);
+      // 一覧列挙（list）は管理者のみ許可（削除済み過去画像の列挙漏洩防止）
+      allow list: if isAdmin();
+
+      // アップロード: 団体アカウント本人のみ（5MB未満の画像、許可フォルダ限定）
+      allow create, update: if isOwner(orgId)
+        && isOrgAccount()
+        && folder in ['logo', 'photos', 'proof']
+        && fileName.size() <= 200
+        && isImage()
+        && isLessThan5MB();
+
+      allow delete: if isAdmin() || isOwner(orgId);
     }
   }
 }
