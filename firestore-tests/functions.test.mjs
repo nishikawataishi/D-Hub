@@ -519,3 +519,124 @@ test("[P3-4] 新規通報・新規団体申請の作成時に運営通知トリ�
   const seedNote = await adminDb.collection("admin_notifications").doc(`report_${seedReportId}`).get();
   assert.equal(seedNote.exists, false);
 });
+
+// ============================================================================
+// 【追加検証】本人退会と削除トリガーの競合防止 ＆ verifyCode 認証状態すり替え防止
+// ============================================================================
+
+test("[P2-4d] Storage画像・イベントを持つ学生・団体の本人退会（deleteMyAccount）で削除トリガーが重複実行・競合せず一発で完了する", async () => {
+  // 1) 学生の本人退会（Storage複数写真付き）
+  const uid = "p24_self_delete_with_storage";
+  const email = "selfdel@mail2.doshisha.ac.jp";
+
+  await adminDb.collection("users").doc(uid).set({
+    name: "退会テスト学生",
+    isStudentVerified: true,
+    createdAt: new Date(),
+  });
+  await adminDb.collection("users").doc(uid).collection("private").doc("verification").set({
+    universityEmail: email,
+  });
+
+  const bucket = admin.storage().bucket();
+  for (let i = 0; i < 5; i++) {
+    await bucket.file(`users/${uid}/photos/photo_${i}.png`).save(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+      { contentType: "image/png" },
+    );
+  }
+
+  await loginTestUser(uid, email);
+  const delRes = await httpsCallable(clientFunctions, "deleteMyAccount")();
+  assert.equal(delRes.data.success, true);
+
+  const [remainingFiles] = await bucket.getFiles({ prefix: `users/${uid}/` });
+  assert.equal(remainingFiles.length, 0, "退会後に Storage 画像が残存しています");
+
+  await assert.rejects(
+    () => adminAuth.getUser(uid),
+    (err) => err.code === "auth/user-not-found",
+  );
+
+  // 2) 団体の本人退会（Storageロゴ・写真＋主催イベント＋申込データ付き）
+  const orgUid = "p24_self_delete_org";
+  const orgEmail = "selfdel-org@example.com";
+  await adminDb.collection("organizations").doc(orgUid).set({
+    name: "退会テスト団体",
+    status: "verified",
+    representativeId: orgUid,
+    createdAt: new Date(),
+  });
+  await adminDb.collection("events").doc("selfdel_org_ev").set({
+    organizationId: orgUid,
+    title: "退会団体イベント",
+  });
+  await adminDb.collection("events").doc("selfdel_org_ev").collection("applications").doc("st_1").set({
+    studentId: "st_1",
+    studentName: "申込学生",
+    status: "applied",
+  });
+  for (let i = 0; i < 3; i++) {
+    await bucket.file(`organizations/${orgUid}/photos/p_${i}.png`).save(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+      { contentType: "image/png" },
+    );
+  }
+
+  await loginTestUser(orgUid, orgEmail);
+  const orgDelRes = await httpsCallable(clientFunctions, "deleteMyAccount")();
+  assert.equal(orgDelRes.data.success, true);
+
+  const [remainingOrgFiles] = await bucket.getFiles({ prefix: `organizations/${orgUid}/` });
+  assert.equal(remainingOrgFiles.length, 0, "団体退会後に Storage 画像が残存しています");
+
+  // トリガーの非同期発火完了を待ち、削除中マーカーがゴミとして残っていないことを確認
+  const markersCleaned = await waitForCondition(async () => {
+    const m1 = await adminDb.collection("_account_deletions").doc(uid).get();
+    const m2 = await adminDb.collection("_account_deletions").doc(orgUid).get();
+    return !m1.exists && !m2.exists;
+  });
+  assert.equal(markersCleaned, true, "退会完了後に _account_deletions マーカーが残存しています");
+});
+
+test("[P0-1e] sendVerificationCode 後に Auth メールを外部アドレスへすり替えたり団体化して verifyCode を呼んでも拒否される", async () => {
+  const uid = "p01_swap_email_attacker";
+  const uniEmail = "swaptest@mail2.doshisha.ac.jp";
+
+  await adminDb.collection("users").doc(uid).set({
+    isStudentVerified: false,
+    createdAt: new Date(),
+  });
+  await loginTestUser(uid, uniEmail);
+  const sendCode = httpsCallable(clientFunctions, "sendVerificationCode");
+  const verifyCode = httpsCallable(clientFunctions, "verifyCode");
+
+  await sendCode({ email: uniEmail });
+  const priv = await adminDb.collection("users").doc(uid).collection("private").doc("verification").get();
+  const code = crackSixDigitHash(priv.data().codeHashedValue);
+
+  // 1) コード受信後に Firebase Auth のメールアドレスを外部 Gmail に変更して verifyCode を試みる
+  await adminAuth.updateUser(uid, { email: "swapped-external@gmail.com" });
+
+  await assert.rejects(
+    () => verifyCode({ code }),
+    (err) => err.code === "functions/permission-denied",
+  );
+
+  const afterUser = await adminDb.collection("users").doc(uid).get();
+  assert.equal(afterUser.data().isStudentVerified, false, "メールすり替え後に学生認証が通過してしまいました");
+
+  // 2) メールを戻しても、同UIDに団体ドキュメントが存在する状態では verifyCode を拒否する
+  await adminAuth.updateUser(uid, { email: uniEmail });
+  await adminDb.collection("organizations").doc(uid).set({
+    name: "二重ロール偽装団体",
+    status: "pending",
+    representativeId: uid,
+  });
+
+  await assert.rejects(
+    () => verifyCode({ code }),
+    (err) => err.code === "functions/failed-precondition",
+  );
+});
+

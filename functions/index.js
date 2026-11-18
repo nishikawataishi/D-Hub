@@ -31,12 +31,14 @@ const SMTP_PASS = defineSecret("SMTP_PASS");
 const ALLOWED_DOMAIN_PATTERN =
     /^[a-z0-9._%+-]+@(mail\d*\.doshisha\.ac\.jp|dwc\.doshisha\.ac\.jp)$/;
 
-// レート制限・認証設定
+// レート制限・認証・削除制御設定
 const MAX_CODES_PER_HOUR = 3;
 const CODE_EXPIRY_MINUTES = 30;
 const MAX_VERIFY_ATTEMPTS = 5;
 const RECENT_AUTH_WINDOW_SECONDS = 10 * 60;
 const EVENT_DELETE_CONCURRENCY = 20;
+const SELF_DELETE_MARKER_COLLECTION = "_account_deletions";
+const SELF_DELETE_MARKER_TTL_MS = 10 * 60 * 1000;
 
 /**
  * SHA-256ハッシュを生成する
@@ -65,6 +67,17 @@ function maskEmail(email) {
     const [local, domain] = email.split("@");
     const visible = local.slice(0, Math.min(2, local.length));
     return `${visible}***@${domain}`;
+}
+
+/**
+ * メール件名などの単一行フィールド向けに改行コードを除去する
+ * @param {unknown} input 任意の入力値
+ * @return {string} 単一行に正規化された文字列
+ */
+function sanitizeSingleLine(input) {
+    return String(input ?? "")
+        .replace(/[\r\n]+/g, " ")
+        .trim();
 }
 
 /**
@@ -130,6 +143,48 @@ async function deleteAuthUserIdempotent(uid) {
 }
 
 /**
+ * 本人退会（deleteMyAccount）による削除処理中マーカーを確認・消費する。
+ * deleteMyAccount が進行中（または完了直後）の場合は削除トリガー側の重複フルスキャン・
+ * Storage並列削除競合・先回りAuth削除を抑止するために true を返す。
+ * @param {string} uid 対象UID
+ * @param {"pendingOrgTrigger"|"pendingUserTrigger"} triggerField 消費するトリガー種別フィールド
+ * @return {Promise<boolean>} 本人退会処理の一部であるためトリガー側をスキップすべきなら true
+ */
+async function consumeSelfDeleteTriggerMarker(uid, triggerField) {
+    const markerRef = db.collection(SELF_DELETE_MARKER_COLLECTION).doc(uid);
+    return db.runTransaction(async (tx) => {
+        const snap = await tx.get(markerRef);
+        if (!snap.exists) return false;
+
+        const data = snap.data() || {};
+        const nowMs = Date.now();
+        if (typeof data.expiresAtMs !== "number" || data.expiresAtMs <= nowMs) {
+            tx.delete(markerRef);
+            return false;
+        }
+
+        const nextOrg =
+            triggerField === "pendingOrgTrigger"
+                ? false
+                : Boolean(data.pendingOrgTrigger);
+        const nextUser =
+            triggerField === "pendingUserTrigger"
+                ? false
+                : Boolean(data.pendingUserTrigger);
+
+        if (data.selfDeleteCompleted === true && !nextOrg && !nextUser) {
+            tx.delete(markerRef);
+        } else {
+            tx.update(markerRef, {
+                pendingOrgTrigger: nextOrg,
+                pendingUserTrigger: nextUser,
+            });
+        }
+        return true;
+    });
+}
+
+/**
  * 学生認証コードを生成・保存・送信する Cloud Function
  * - P0-1: 正規表現厳格化・ログインメール一致検証・団体アカウント拒否・重複大学メール防止
  * - P2-2: Firestoreトランザクションによるアトミックなレート制限（並列呼び出し突破の防止）・ログマスク
@@ -156,13 +211,10 @@ exports.sendVerificationCode = onCall(
 
         const uid = request.auth.uid;
 
-        // ログイン中のFirebase Authメールアドレスと送信先大学メールの一致を強制する
-        // （無関係な捨てアカウントから特定の同志社生へ確認コードを送りつける嫌がらせや相乗りを遮断）
-        let authEmail = request.auth.token.email;
-        if (!authEmail) {
-            const userRecord = await getAuth().getUser(uid);
-            authEmail = userRecord.email;
-        }
+        // Firebase Auth の最新ユーザーレコード（取得失敗時はトークン）から現在のメールを確認し、
+        // 送信先大学メールとの完全一致を強制する（嫌がらせメール爆撃・相乗り・メールすり替えを遮断）
+        const userRecord = await getAuth().getUser(uid);
+        const authEmail = userRecord.email || request.auth.token.email;
         if (!authEmail || authEmail.trim().toLowerCase() !== normalizedEmail) {
             throw new HttpsError(
                 "permission-denied",
@@ -325,7 +377,7 @@ exports.sendVerificationCode = onCall(
 /**
  * 認証コードを検証する Cloud Function
  * - ブルートフォース対策: 最大5回まで試行可能
- * - P0-1: 大学メール一意性ロックのアトミック取得
+ * - P0-1: 最新Authメール一致検証・団体アカウント拒否・大学メール一意性ロックのアトミック取得
  * - P2-2: 認証成功時に送信レート制限カウンタ（codeSentCount等）を削除しない
  */
 exports.verifyCode = onCall({ maxInstances: 5 }, async (request) => {
@@ -339,24 +391,62 @@ exports.verifyCode = onCall({ maxInstances: 5 }, async (request) => {
     }
 
     const uid = request.auth.uid;
+
+    // コード送信後に Firebase Auth REST API でメールアドレスを外部アドレスへすり替える攻撃を防止するため、
+    // トークン内のキャッシュではなく Auth サーバー上の最新メールアドレスを取得して照合する
+    const userRecord = await getAuth().getUser(uid);
+    const currentAuthEmail = (userRecord.email || "").trim().toLowerCase();
+
+    const orgRef = db.collection("organizations").doc(uid);
     const userRef = db.collection("users").doc(uid);
     const privateRef = userRef.collection("private").doc("verification");
 
     const result = await db.runTransaction(async (transaction) => {
-        const userDoc = await transaction.get(userRef);
+        const [orgDoc, userDoc, privateDoc] = await Promise.all([
+            transaction.get(orgRef),
+            transaction.get(userRef),
+            transaction.get(privateRef),
+        ]);
+
+        if (orgDoc.exists) {
+            throw new HttpsError(
+                "failed-precondition",
+                "団体アカウントでは学生認証を行えません。",
+            );
+        }
         if (!userDoc.exists) {
             throw new HttpsError("not-found", "ユーザー情報が見つかりません。");
         }
-        const privateDoc = await transaction.get(privateRef);
         if (!privateDoc.exists) {
             throw new HttpsError("failed-precondition", "認証コードが送信されていません。");
         }
 
         const data = privateDoc.data();
         const hashedCode = data.codeHashedValue;
-        const universityEmail = data.universityEmail;
+        const universityEmail =
+            typeof data.universityEmail === "string"
+                ? data.universityEmail.trim().toLowerCase()
+                : "";
         const expiresAt = data.codeExpiresAt?.toDate();
         const attempts = data.verificationAttempts || 0;
+
+        if (!universityEmail || !ALLOWED_DOMAIN_PATTERN.test(universityEmail)) {
+            throw new HttpsError(
+                "failed-precondition",
+                "有効な大学メールアドレスが確認できません。",
+            );
+        }
+
+        if (!currentAuthEmail || currentAuthEmail !== universityEmail) {
+            throw new HttpsError(
+                "permission-denied",
+                "ログイン中のメールアドレスが確認コード送信先と一致しません。",
+            );
+        }
+
+        if (userDoc.data()?.isStudentVerified === true) {
+            return { success: true, message: "学生認証が完了しました！" };
+        }
 
         if (attempts >= MAX_VERIFY_ATTEMPTS) {
             throw new HttpsError(
@@ -374,13 +464,6 @@ exports.verifyCode = onCall({ maxInstances: 5 }, async (request) => {
 
         if (!hashedCode || typeof hashedCode !== "string") {
             throw new HttpsError("failed-precondition", "認証コードが送信されていません。");
-        }
-
-        if (!universityEmail || !ALLOWED_DOMAIN_PATTERN.test(universityEmail)) {
-            throw new HttpsError(
-                "failed-precondition",
-                "有効な大学メールアドレスが確認できません。",
-            );
         }
 
         const emailLockRef = db
@@ -505,7 +588,7 @@ async function cleanupRelatedAccountData(uid, { cleanStudentData, cleanOrgData }
 
     await bulkWriter.close();
 
-    // Storage 画像の一括削除
+    // Storage 画像の一括削除（force: true および 404 無視で冪等性を担保）
     const prefixes = [];
     if (cleanStudentData) prefixes.push(`users/${uid}/`);
     if (cleanOrgData) prefixes.push(`organizations/${uid}/`);
@@ -513,10 +596,16 @@ async function cleanupRelatedAccountData(uid, { cleanStudentData, cleanOrgData }
     const bucket = getStorage().bucket();
     for (const prefix of prefixes) {
         try {
-            await bucket.deleteFiles({ prefix });
+            await bucket.deleteFiles({ prefix, force: true });
         } catch (error) {
-            failedDeletes++;
-            logger.error(`Storage delete failed: ${prefix}`, error);
+            const errors = Array.isArray(error) ? error : [error];
+            const nonNotFound = errors.filter(
+                (e) => e && e.code !== 404 && e.code !== "404",
+            );
+            if (nonNotFound.length > 0) {
+                failedDeletes++;
+                logger.error(`Storage delete failed: ${prefix}`, error);
+            }
         }
     }
 
@@ -548,47 +637,86 @@ exports.deleteMyAccount = onCall(
             );
         }
 
-        // 退会後の再登録を許可するため、削除前に大学メールを取得しておく
-        const privateSnap = await db
-            .collection("users")
-            .doc(uid)
-            .collection("private")
-            .doc("verification")
-            .get();
+        const orgRef = db.collection("organizations").doc(uid);
+        const userRef = db.collection("users").doc(uid);
+        const privateRef = userRef.collection("private").doc("verification");
+        const deletionMarkerRef = db
+            .collection(SELF_DELETE_MARKER_COLLECTION)
+            .doc(uid);
+
+        // 削除対象の存在確認と大学メール取得を事前実行し、削除トリガーとの二重実行防止マーカーを記録する
+        const [orgSnap, userSnap, privateSnap] = await Promise.all([
+            orgRef.get(),
+            userRef.get(),
+            privateRef.get(),
+        ]);
+        const hasOrgDoc = orgSnap.exists;
+        const hasUserDoc = userSnap.exists;
         const universityEmail = privateSnap.data()?.universityEmail;
 
-        // ══ フェーズ1: 権限の失効（必ず最初に実行） ══
-        await db.recursiveDelete(db.collection("organizations").doc(uid));
-        await db.recursiveDelete(db.collection("users").doc(uid));
+        if (hasOrgDoc || hasUserDoc) {
+            await deletionMarkerRef.set({
+                mode: "self",
+                pendingOrgTrigger: hasOrgDoc,
+                pendingUserTrigger: hasUserDoc,
+                selfDeleteCompleted: false,
+                expiresAtMs: Date.now() + SELF_DELETE_MARKER_TTL_MS,
+                startedAt: FieldValue.serverTimestamp(),
+            });
+        }
+
         try {
-            await getAuth().revokeRefreshTokens(uid);
-        } catch (error) {
-            if (error.code !== "auth/user-not-found") {
-                throw error;
+            // ══ フェーズ1: 権限の失効（必ず最初に実行） ══
+            await db.recursiveDelete(orgRef);
+            await db.recursiveDelete(userRef);
+            try {
+                await getAuth().revokeRefreshTokens(uid);
+            } catch (error) {
+                if (error.code !== "auth/user-not-found") {
+                    throw error;
+                }
             }
+
+            await releaseUniversityEmailLock(uid, universityEmail);
+
+            // ══ フェーズ2: 残りの関連データ削除 ══
+            const failedDeletes = await cleanupRelatedAccountData(uid, {
+                cleanStudentData: true,
+                cleanOrgData: true,
+            });
+
+            if (failedDeletes > 0) {
+                logger.error(
+                    `deleteMyAccount incomplete: uid=${uid} failures=${failedDeletes}`,
+                );
+                throw new HttpsError(
+                    "internal",
+                    "データの削除に失敗しました。時間をおいて再度お試しください。",
+                );
+            }
+
+            await deleteAuthUserIdempotent(uid);
+
+            // トリガー側が既にマーカーを消費済みなら即削除し、遅延発火待ちなら完了フラグを立ててトリガー側に削除を委ねる
+            if (hasOrgDoc || hasUserDoc) {
+                await db.runTransaction(async (tx) => {
+                    const snap = await tx.get(deletionMarkerRef);
+                    if (!snap.exists) return;
+                    const d = snap.data() || {};
+                    if (!d.pendingOrgTrigger && !d.pendingUserTrigger) {
+                        tx.delete(deletionMarkerRef);
+                    } else {
+                        tx.update(deletionMarkerRef, { selfDeleteCompleted: true });
+                    }
+                });
+            }
+
+            logger.info(`Account fully deleted: uid=${uid}`);
+            return { success: true };
+        } catch (error) {
+            await deletionMarkerRef.delete().catch(() => {});
+            throw error;
         }
-
-        await releaseUniversityEmailLock(uid, universityEmail);
-
-        // ══ フェーズ2: 残りの関連データ削除 ══
-        const failedDeletes = await cleanupRelatedAccountData(uid, {
-            cleanStudentData: true,
-            cleanOrgData: true,
-        });
-
-        if (failedDeletes > 0) {
-            logger.error(
-                `deleteMyAccount incomplete: uid=${uid} failures=${failedDeletes}`,
-            );
-            throw new HttpsError(
-                "internal",
-                "データの削除に失敗しました。時間をおいて再度お試しください。",
-            );
-        }
-
-        await deleteAuthUserIdempotent(uid);
-        logger.info(`Account fully deleted: uid=${uid}`);
-        return { success: true };
     },
 );
 
@@ -708,12 +836,20 @@ exports.onEventDeleted = onDocumentDeleted(
 
 /**
  * 団体ドキュメント削除時（管理画面からのBAN削除等）にサブコレクション・関連イベント・
- * スカウト・Storage画像・Firebase Authアカウントを自動一掃する
+ * スカウト・Storage画像・Firebase Authアカウントを自動一掃する。
+ * 本人退会（deleteMyAccount）による削除の場合は重複処理を避けるためスキップする。
  */
 exports.onOrganizationDeleted = onDocumentDeleted(
     { document: "organizations/{orgId}", maxInstances: 5 },
     async (event) => {
         const { orgId } = event.params;
+
+        if (await consumeSelfDeleteTriggerMarker(orgId, "pendingOrgTrigger")) {
+            logger.info(
+                `Skipped duplicate trigger cleanup for self-deleted organization: orgId=${orgId}`,
+            );
+            return;
+        }
 
         await db.recursiveDelete(db.collection("organizations").doc(orgId));
         await cleanupRelatedAccountData(orgId, {
@@ -732,12 +868,20 @@ exports.onOrganizationDeleted = onDocumentDeleted(
 
 /**
  * 学生ユーザードキュメント削除時（管理画面からの削除等）に private サブコレクション・
- * スカウト・イベント申込・大学メール一意性ロック・Storage・Authアカウントを自動一掃する
+ * スカウト・イベント申込・大学メール一意性ロック・Storage・Authアカウントを自動一掃する。
+ * 本人退会（deleteMyAccount）による削除の場合は重複処理を避けるためスキップする。
  */
 exports.onUserDeleted = onDocumentDeleted(
     { document: "users/{userId}", maxInstances: 5 },
     async (event) => {
         const { userId } = event.params;
+
+        if (await consumeSelfDeleteTriggerMarker(userId, "pendingUserTrigger")) {
+            logger.info(
+                `Skipped duplicate trigger cleanup for self-deleted student: userId=${userId}`,
+            );
+            return;
+        }
 
         const privateSnap = await db
             .collection("users")
@@ -846,21 +990,23 @@ exports.onReportCreated = onDocumentCreated(
         if (!data || data.isReviewSeed === true) return;
 
         const { reportId } = event.params;
-        const safeTargetName = escapeHtml(data.targetName || "不明");
+        const cleanReason = sanitizeSingleLine(data.reason || "不明");
+        const cleanTargetName = sanitizeSingleLine(data.targetName || "不明");
+        const safeTargetName = escapeHtml(cleanTargetName || "不明");
         const safeTargetType = escapeHtml(data.targetType || "不明");
         const safeTargetId = escapeHtml(data.targetId || "不明");
-        const safeReason = escapeHtml(data.reason || "不明");
+        const safeReason = escapeHtml(cleanReason || "不明");
         const safeReporterRole = escapeHtml(data.reporterRole || "不明");
         const safeDetail = escapeHtml(data.detail || "（補足なし）");
 
-        const subject = `【D-Hub 要確認】新規通報を受信しました（理由: ${data.reason || "不明"}）`;
+        const subject = `【D-Hub 要確認】新規通報を受信しました（理由: ${cleanReason || "不明"}）`;
         const textBody = [
             "D-Hub で新しい通報が送信されました。24時間以内に管理画面から内容を確認してください。",
             "",
             `通報ID: ${reportId}`,
             `対象種別: ${data.targetType || "不明"}`,
-            `対象名: ${data.targetName || "不明"} (${data.targetId || "不明"})`,
-            `通報理由: ${data.reason || "不明"}`,
+            `対象名: ${cleanTargetName || "不明"} (${data.targetId || "不明"})`,
+            `通報理由: ${cleanReason || "不明"}`,
             `通報者種別: ${data.reporterRole || "不明"}`,
             `補足内容: ${data.detail || "（補足なし）"}`,
         ].join("\n");
@@ -909,25 +1055,30 @@ exports.onOrganizationCreated = onDocumentCreated(
         }
 
         const { orgId } = event.params;
-        const safeOrgName = escapeHtml(data.name || "団体名未設定");
-        const safeCampus = escapeHtml(data.campus || "未設定");
-        const safeInstagram = escapeHtml(data.instagramUrl || "（未入力）");
+        const cleanOrgName = sanitizeSingleLine(data.name || "団体名未設定");
+        const cleanCampus = sanitizeSingleLine(data.campus || "未設定");
+        const cleanInstagram = sanitizeSingleLine(data.instagramUrl || "（未入力）");
+        const safeOrgName = escapeHtml(cleanOrgName || "団体名未設定");
+        const safeCampus = escapeHtml(cleanCampus || "未設定");
+        const safeInstagram = escapeHtml(cleanInstagram || "（未入力）");
 
-        const subject = `【D-Hub 審査依頼】新規団体アカウントが登録されました（${data.name || "団体名未設定"}）`;
+        const subject = `【D-Hub 審査依頼】新規団体アカウントが登録されました（${cleanOrgName || "団体名未設定"}）`;
         const textBody = [
             "D-Hub に新しい団体アカウントが登録されました（ステータス: pending）。",
             "管理画面の「団体管理」タブから内容を確認し、承認・却下の審査を行ってください。",
+            "※アカウント登録直後は『団体名未設定』の状態のため、団体側のプロフィール入力状況もあわせてご確認ください。",
             "",
             `団体UID: ${orgId}`,
-            `団体名: ${data.name || "団体名未設定"}`,
-            `キャンパス: ${data.campus || "未設定"}`,
-            `Instagram: ${data.instagramUrl || "（未入力）"}`,
+            `団体名: ${cleanOrgName || "団体名未設定"}`,
+            `キャンパス: ${cleanCampus || "未設定"}`,
+            `Instagram: ${cleanInstagram || "（未入力）"}`,
         ].join("\n");
 
         const htmlBody = `
         <div style="font-family: sans-serif; color: #333;">
             <h2>【D-Hub】新規団体登録のお知らせ</h2>
             <p>審査待ちの団体アカウントが作成されました。管理画面から実在確認・審査を行ってください。</p>
+            <p style="color: #666; font-size: 12px;">※アカウント登録直後は初期値（団体名未設定）のため、団体側のプロフィール編集完了後に承認審査を行ってください。</p>
             <ul>
                 <li><strong>団体UID:</strong> <code>${escapeHtml(orgId)}</code></li>
                 <li><strong>団体名:</strong> ${safeOrgName}</li>
