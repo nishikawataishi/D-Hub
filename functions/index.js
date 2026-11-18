@@ -488,14 +488,14 @@ exports.verifyCode = onCall({ maxInstances: 5 }, async (request) => {
             }
         }
 
-        // 定数時間比較でハッシュを検証
+        // 定数時間比較でハッシュを検証（非16進文字列混入時のバイト長不一致例外も防御）
         const inputHashed = hashValue(code.trim());
+        const inputBuf = Buffer.from(inputHashed, "hex");
+        const storedBuf = Buffer.from(hashedCode, "hex");
         const isMatch =
-            inputHashed.length === hashedCode.length &&
-            crypto.timingSafeEqual(
-                Buffer.from(inputHashed, "hex"),
-                Buffer.from(hashedCode, "hex"),
-            );
+            inputBuf.length === 32 &&
+            inputBuf.length === storedBuf.length &&
+            crypto.timingSafeEqual(inputBuf, storedBuf);
 
         if (!isMatch) {
             transaction.update(privateRef, {
@@ -891,8 +891,9 @@ exports.onUserDeleted = onDocumentDeleted(
             .get();
         const universityEmail = privateSnap.data()?.universityEmail;
 
-        await db.recursiveDelete(db.collection("users").doc(userId));
+        // 途中エラー後のリトライ時にも確実にロックを解放できるよう、private削除より先に解除する
         await releaseUniversityEmailLock(userId, universityEmail);
+        await db.recursiveDelete(db.collection("users").doc(userId));
 
         await cleanupRelatedAccountData(userId, {
             cleanStudentData: true,

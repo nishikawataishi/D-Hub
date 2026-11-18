@@ -1844,3 +1844,198 @@ test("[互換性9 & P1-5] instagramUrl のパス内 @ 表記および groupLineU
   }
 });
 
+test("[P1-5 強化3] scouts の organizationEmoji / targetUserName による定型文制限バイパスおよび Storage URL のパス細工を遮断", async () => {
+  const EMOJI_ORG = "emoji_strict_org";
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "organizations", EMOJI_ORG), {
+      name: "絵文字検証サークル",
+      logoEmoji: "🏀",
+      categories: ["sports"],
+      campus: "imadegawa",
+      instagramUrl: "",
+      groupLineUrl: "",
+      status: "verified",
+      representativeId: EMOJI_ORG,
+    });
+  });
+
+  // ScoutDetailScreen でロゴ未設定時にそのまま描画される organizationEmoji に連絡先IDを埋め込む攻撃を遮断
+  await assertFails(setDoc(doc(as(EMOJI_ORG), "scouts", "spoof_emoji_scout"), {
+    targetUserId: STUDENT,
+    organizationId: EMOJI_ORG,
+    organizationName: "絵文字検証サークル",
+    organizationEmoji: "LINE:@evil_id",
+    templateId: 4,
+    isRead: false,
+    sentAt: serverTimestamp(),
+  }));
+
+  // targetUserName に自由記述メッセージを紛れ込ませる攻撃を遮断
+  await assertFails(setDoc(doc(as(EMOJI_ORG), "scouts", "spoof_target_name_scout"), {
+    targetUserId: STUDENT,
+    organizationId: EMOJI_ORG,
+    organizationName: "絵文字検証サークル",
+    organizationEmoji: "🏀",
+    targetUserName: "LINE ID: evil_contact に連絡してね",
+    templateId: 4,
+    isRead: false,
+    sentAt: serverTimestamp(),
+  }));
+
+  // 登録値と一致する正常なスカウト送信は通る
+  await assertSucceeds(setDoc(doc(as(EMOJI_ORG), "scouts", "valid_emoji_target_scout"), {
+    targetUserId: STUDENT,
+    organizationId: EMOJI_ORG,
+    organizationName: "絵文字検証サークル",
+    organizationEmoji: "🏀",
+    targetUserName: "学生A",
+    templateId: 4,
+    isRead: false,
+    sentAt: serverTimestamp(),
+  }));
+
+  // Storage URL のファイル名部分に生のスラッシュ '/' や '%2F'（サブ階層偽装）を含む細工URLを遮断
+  await assertFails(updateDoc(doc(as(STUDENT), "users", STUDENT), {
+    iconUrl:
+      `https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/users%2F${STUDENT}%2Ficon%2Ffoo/../../other.png?alt=media`,
+  }));
+  await assertFails(updateDoc(doc(as(STUDENT), "users", STUDENT), {
+    iconUrl:
+      `https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/users%2F${STUDENT}%2Ficon%2Fsub%2Fevil.png?alt=media`,
+  }));
+
+  // 日本語や空白がURLエンコードされた正規の getDownloadURL() 形式は通る
+  await assertSucceeds(updateDoc(doc(as(STUDENT), "users", STUDENT), {
+    iconUrl:
+      `https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/users%2F${STUDENT}%2Ficon%2Fuuid_%E5%86%99%E7%9C%9F%201.jpg?alt=media&token=abcd-1234`,
+  }));
+});
+
+test("[互換性10 & P1-5] openchat.line.me や大文字混じり Instagram / LINE URL を許可し、バックスラッシュ偽装等は遮断する", async () => {
+  const orgDb = as(ORG_VERIFIED);
+
+  for (const validInsta of [
+    "https://Instagram.com/d_spirits",
+    "Instagram.com/@d_spirits",
+    "Https://www.instagram.com/@d_spirits",
+    "https://www.instagram.com?igsh=abc123",
+  ]) {
+    await assertSucceeds(updateDoc(doc(orgDb, "organizations", ORG_VERIFIED), {
+      instagramUrl: validInsta,
+    }));
+  }
+
+  for (const validLine of [
+    "https://openchat.line.me/jp/cover/AbCdEfGhIjKlMnOpQrStUvWxYz",
+    "https://www.line.me/ti/g/AbCdEf12345",
+    "Https://page.line.me/123abcde",
+  ]) {
+    await assertSucceeds(updateDoc(doc(orgDb, "organizations", ORG_VERIFIED), {
+      groupLineUrl: validLine,
+    }));
+  }
+
+  for (const evilUrl of [
+    "https://www.instagram.com\\@evil.example.com",
+    "https://openchat.line.me.evil.example.com/jp/cover/abc",
+    "https://openchat.line.me@evil.example.com/jp/cover/abc",
+  ]) {
+    await assertFails(updateDoc(doc(orgDb, "organizations", ORG_VERIFIED), {
+      instagramUrl: evilUrl,
+    }));
+    await assertFails(updateDoc(doc(orgDb, "organizations", ORG_VERIFIED), {
+      groupLineUrl: evilUrl,
+    }));
+  }
+});
+
+test("[互換性11] 変更不可の管理フィールドや未変更フィールドにレガシー形式が残る既存ドキュメントでも更新・申込がデッドロックしない", async () => {
+  const DEADLOCK_ORG = "legacy_deadlock_org";
+  const DEADLOCK_STUDENT = "legacy_deadlock_student";
+  const futureDate = Timestamp.fromDate(new Date(Date.now() + 5 * 24 * 60 * 60 * 1000));
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, "organizations", DEADLOCK_ORG), {
+      name: "旧データ団体",
+      description: "旧データ",
+      categories: ["culture"],
+      campus: "imadegawa",
+      logoEmoji: "🎨",
+      instagramUrl: "",
+      groupLineUrl: "",
+      status: "verified",
+      representativeId: DEADLOCK_ORG,
+      // 過去スクリプト等で長い文字列（55文字）として保存された createdAt
+      createdAt: "Wed Apr 01 2026 12:00:00 GMT+0900 (Japan Standard Time)",
+    });
+    await setDoc(doc(db, "events", "legacy_deadlock_event"), {
+      organizationId: DEADLOCK_ORG,
+      organizationName: "旧データ団体",
+      title: "旧イベント",
+      description: "詳細",
+      startAt: futureDate,
+      campus: "imadegawa",
+      // 旧イベントに残る日本語ラベル配列とISO文字列 createdAt
+      categories: ["文化系"],
+      createdAt: "2026-03-15T10:00:00.000Z",
+    });
+    await setDoc(doc(db, "users", DEADLOCK_STUDENT), {
+      name: "",
+      faculty: "",
+      grade: 1,
+      mainCampus: "",
+      interests: [],
+      isStudentVerified: true,
+    });
+  });
+
+  // 1) 変更禁止フィールド createdAt が長文文字列でも updateOrgProfile がデッドロックしない
+  await assertSucceeds(updateDoc(doc(as(DEADLOCK_ORG), "organizations", DEADLOCK_ORG), {
+    name: "旧データ団体（更新）",
+    description: "紹介文を更新しました",
+    categories: ["culture"],
+    campus: "imadegawa",
+    logoEmoji: "🎨",
+    instagramUrl: "@legacy_org",
+    groupLineUrl: "",
+    logoUrl: null,
+    photoUrls: [],
+  }));
+
+  // 2) 旧 categories や文字列 createdAt が残る既存イベントでも EventEditScreen から更新できる
+  await assertSucceeds(updateDoc(doc(as(DEADLOCK_ORG), "events", "legacy_deadlock_event"), {
+    organizationId: DEADLOCK_ORG,
+    organizationName: "旧データ団体（更新）",
+    organizationEmoji: "🎨",
+    organizationCategory: "すべて",
+    title: "旧イベント（場所変更）",
+    description: "詳細更新",
+    startAt: futureDate,
+    campus: "imadegawa",
+    fee: null,
+    capacity: null,
+    location: "新町キャンパス",
+    updatedAt: serverTimestamp(),
+  }));
+
+  // 3) mainCampus / name / faculty が空文字の既存学生でもマイページ興味タグ追加やイベント申込が通る
+  await assertSucceeds(setDoc(
+    doc(as(DEADLOCK_STUDENT), "users", DEADLOCK_STUDENT),
+    { interests: ["音楽", "映画"] },
+    { merge: true },
+  ));
+  await assertSucceeds(setDoc(
+    doc(as(DEADLOCK_STUDENT), "events", "legacy_deadlock_event", "applications", DEADLOCK_STUDENT),
+    {
+      studentId: DEADLOCK_STUDENT,
+      studentName: "",
+      studentFaculty: "",
+      studentGrade: 1,
+      status: "applied",
+      appliedAt: serverTimestamp(),
+    },
+  ));
+});
+
+
