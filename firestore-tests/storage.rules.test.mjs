@@ -23,9 +23,10 @@ import {
   assertSucceeds,
   assertFails,
 } from "@firebase/rules-unit-testing";
-import { ref, uploadBytes, getBytes, deleteObject } from "firebase/storage";
+import { doc, setDoc } from "firebase/firestore";
+import { ref, uploadBytes, getBytes, deleteObject, listAll } from "firebase/storage";
 
-const PROJECT_ID = "d-scout-rules-test";
+const PROJECT_ID = process.env.GCLOUD_PROJECT || "d-scout-rules-test";
 
 // テスト用UID
 const STUDENT = "student_uid";
@@ -44,6 +45,9 @@ let testEnv;
 before(async () => {
   testEnv = await initializeTestEnvironment({
     projectId: PROJECT_ID,
+    firestore: {
+      rules: readFileSync(new URL("../firestore.rules", import.meta.url), "utf8"),
+    },
     storage: {
       rules: readFileSync(new URL("../storage.rules", import.meta.url), "utf8"),
     },
@@ -55,9 +59,21 @@ after(async () => {
 });
 
 beforeEach(async () => {
+  await testEnv.clearFirestore();
   await testEnv.clearStorage();
-  // 読み取り・削除の対象になる既存ファイルをルール無効化して配置
+  // 読み取り・削除の対象になる既存ファイルおよびアカウント認可状態（Firestore）を配置
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, "users", STUDENT), {
+      name: "学生A", isStudentVerified: true,
+    });
+    await setDoc(doc(db, "users", OTHER_STUDENT), {
+      name: "学生B", isStudentVerified: true,
+    });
+    await setDoc(doc(db, "organizations", ORG_VERIFIED), {
+      name: "承認済み団体", status: "verified", representativeId: ORG_VERIFIED,
+    });
+
     const s = ctx.storage();
     await uploadBytes(ref(s, `users/${STUDENT}/icon/me.png`), IMAGE, AS_IMAGE);
     await uploadBytes(ref(s, `users/${STUDENT}/photos/p1.png`), IMAGE, AS_IMAGE);
@@ -199,3 +215,117 @@ test("他人は団体のロゴを削除できない", async () => {
     ref(as(STUDENT), `organizations/${ORG_VERIFIED}/logo/logo.png`),
   ));
 });
+
+// ==========================================================
+// 5. セキュリティ強化（P0-2）および審査待ち/却下団体の互換性検証
+// ==========================================================
+
+const UNVERIFIED_STUDENT = "unverified_student_uid";
+const BARE_AUTH_USER = "bare_auth_uid";
+const ORG_PENDING = "org_pending_uid";
+const ORG_REJECTED = "org_rejected_uid";
+const ADMIN = "admin_uid";
+
+const asAdmin = () => testEnv.authenticatedContext(ADMIN, { admin: true }).storage();
+
+const seedStorageHardeningFixtures = async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, "users", UNVERIFIED_STUDENT), {
+      isStudentVerified: false,
+    });
+    await setDoc(doc(db, "organizations", ORG_PENDING), {
+      name: "審査中団体", status: "pending", representativeId: ORG_PENDING,
+    });
+    await setDoc(doc(db, "organizations", ORG_REJECTED), {
+      name: "却下団体", status: "rejected", representativeId: ORG_REJECTED,
+    });
+
+    const s = ctx.storage();
+    await uploadBytes(
+      ref(s, `organizations/${ORG_PENDING}/photos/proof.png`), IMAGE, AS_IMAGE,
+    );
+    await uploadBytes(
+      ref(s, `organizations/${ORG_VERIFIED}/proof/secret_proof.png`), IMAGE, AS_IMAGE,
+    );
+  });
+};
+
+test("[P0-2] 未認証学生・外部AuthアカウントはStorage画像の閲覧もアップロードもできない", async () => {
+  await seedStorageHardeningFixtures();
+
+  await assertFails(getBytes(ref(as(UNVERIFIED_STUDENT), `users/${STUDENT}/icon/me.png`)));
+  await assertFails(getBytes(ref(as(UNVERIFIED_STUDENT), `organizations/${ORG_VERIFIED}/logo/logo.png`)));
+  await assertFails(getBytes(ref(as(BARE_AUTH_USER), `users/${STUDENT}/icon/me.png`)));
+
+  await assertFails(uploadBytes(
+    ref(as(UNVERIFIED_STUDENT), `users/${UNVERIFIED_STUDENT}/icon/evil.png`),
+    IMAGE,
+    AS_IMAGE,
+  ));
+  await assertFails(uploadBytes(
+    ref(as(UNVERIFIED_STUDENT), `organizations/${UNVERIFIED_STUDENT}/logo/evil.png`),
+    IMAGE,
+    AS_IMAGE,
+  ));
+  await assertFails(uploadBytes(
+    ref(as(BARE_AUTH_USER), `organizations/${BARE_AUTH_USER}/logo/evil.png`),
+    IMAGE,
+    AS_IMAGE,
+  ));
+});
+
+test("[P0-2] 認証済み学生であっても審査待ち団体の画像や proof フォルダは読めない（管理者は閲覧可）", async () => {
+  await seedStorageHardeningFixtures();
+
+  await assertFails(getBytes(
+    ref(as(STUDENT), `organizations/${ORG_PENDING}/photos/proof.png`),
+  ));
+  await assertFails(getBytes(
+    ref(as(STUDENT), `organizations/${ORG_VERIFIED}/proof/secret_proof.png`),
+  ));
+  await assertSucceeds(getBytes(
+    ref(asAdmin(), `organizations/${ORG_PENDING}/photos/proof.png`),
+  ));
+  await assertSucceeds(getBytes(
+    ref(asAdmin(), `organizations/${ORG_VERIFIED}/proof/secret_proof.png`),
+  ));
+});
+
+test("[互換性2] 審査待ち/却下団体は自団体のロゴ・活動写真をアップロード・読み取り・削除できる", async () => {
+  await seedStorageHardeningFixtures();
+
+  for (const orgUid of [ORG_PENDING, ORG_REJECTED]) {
+    await assertSucceeds(uploadBytes(
+      ref(as(orgUid), `organizations/${orgUid}/logo/uuid_logo.png`),
+      IMAGE,
+      AS_IMAGE,
+    ));
+    await assertSucceeds(getBytes(
+      ref(as(orgUid), `organizations/${orgUid}/logo/uuid_logo.png`),
+    ));
+    await assertSucceeds(uploadBytes(
+      ref(as(orgUid), `organizations/${orgUid}/photos/uuid_photo.png`),
+      IMAGE,
+      AS_IMAGE,
+    ));
+    await assertSucceeds(deleteObject(
+      ref(as(orgUid), `organizations/${orgUid}/logo/uuid_logo.png`),
+    ));
+  }
+});
+
+test("[P0-2 強化] 一般ユーザー（認証済み学生・承認済み団体）は Storage フォルダのファイル一覧列挙（listAll）ができない（管理者は可）", async () => {
+  await seedStorageHardeningFixtures();
+
+  // 他人の写真フォルダやアイコンフォルダを列挙して削除済み過去写真を抜く攻撃を遮断
+  await assertFails(listAll(ref(as(OTHER_STUDENT), `users/${STUDENT}/photos`)));
+  await assertFails(listAll(ref(as(ORG_VERIFIED), `users/${STUDENT}/photos`)));
+  await assertFails(listAll(ref(as(STUDENT), `organizations/${ORG_VERIFIED}/logo`)));
+  await assertFails(listAll(ref(as(STUDENT), `organizations/${ORG_PENDING}/photos`)));
+
+  // 管理者は監査・運用のため一覧取得も可能
+  await assertSucceeds(listAll(ref(asAdmin(), `users/${STUDENT}/photos`)));
+  await assertSucceeds(listAll(ref(asAdmin(), `organizations/${ORG_VERIFIED}/logo`)));
+});
+
