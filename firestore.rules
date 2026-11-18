@@ -12,9 +12,9 @@ rules_version = '2';
 //   - faculty: string (任意・0〜100文字)
 //   - grade: int (任意・1〜10)
 //   - mainCampus: string (任意・'imadegawa' | 'kyotanabe' | 'both')
-//   - interests: list<string> (任意・最大50件、合計1500文字以内)
-//   - iconUrl: string | null (任意・本プロジェクトのFirebase Storage URLのみ)
-//   - photoUrls: list<string> (任意・最大10件、各要素は本プロジェクトのStorage URL)
+//   - interests: list<string> (任意・最大20件、空文字不可・各要素1〜100文字・合計1000文字以内)
+//   - iconUrl: string | null (任意・本人の users/{userId}/icon|photos Storage URLのみ)
+//   - photoUrls: list<string> (任意・最大6件、各要素は本人の users/{userId}/icon|photos Storage URL)
 //
 // Subcollection: users/{userId}/private/{docId}
 //   - サーバー（Admin SDK）専用。管理者のreadのみ許可、クライアントwrite完全禁止
@@ -30,11 +30,11 @@ rules_version = '2';
 //   - categories: list<string> (任意・最大25件、OrgCategory列挙値のみ)
 //   - campus: string (任意・'imadegawa' | 'kyotanabe' | 'both')
 //   - logoEmoji: string (任意・最大20文字)
-//   - instagramUrl: string (任意・空文字/@ハンドル/instagram.comドメインのみ)
+//   - instagramUrl: string (任意・空文字/@ハンドル/instagram.comドメインのみ。サブドメイン偽装禁止)
 //   - groupLineUrl: string (任意・空文字または https://line.me/ / https://lin.ee/ のみ)
-//   - logoUrl: string | null (任意・本プロジェクトのStorage URLのみ)
-//   - proofImageUrl: string | null (任意・本プロジェクトのStorage URLのみ)
-//   - photoUrls: list<string> (任意・最大10件、本プロジェクトのStorage URLのみ)
+//   - logoUrl: string | null (任意・自団体の organizations/{docId}/logo|photos Storage URLのみ)
+//   - proofImageUrl: string | null (任意・自団体の organizations/{docId}/proof|photos Storage URLのみ)
+//   - photoUrls: list<string> (任意・最大6件、自団体の organizations/{docId}/photos|logo Storage URLのみ)
 //   - representativeId: string (必須・作成者UID固定、変更不可)
 //   - status: string (必須・create時は'pending'固定、管理者のみ変更可)
 //   - isOfficial: bool (任意・create時はfalse固定、オーナー変更不可)
@@ -47,15 +47,15 @@ rules_version = '2';
 //
 // Collection: events/{eventId}
 //   - organizationId: string (必須・主催団体UID固定、変更不可)
-//   - organizationName: string (任意・自団体名と一致、または更新時は既存値維持可)
+//   - organizationName: string (任意・自団体名と一致、または更新時は既存値/'Unknown'維持可)
 //   - organizationEmoji: string (任意・最大20文字)
 //   - organizationCategory: string (任意・最大30文字)
 //   - categories: list<string> (任意・後方互換)
 //   - title: string (必須・1〜100文字)
 //   - description: string (任意・0〜2000文字)
-//   - startAt: timestamp (必須・create時は現在以降、過去日時への巻き戻し不可)
+//   - startAt: timestamp (必須・create時は現在以降、update時は過去日時への巻き戻し不可・秒丸め許容)
 //   - campus: string (任意・'imadegawa' | 'kyotanabe' | 'both')
-//   - organizationLogoUrl: string | null (任意・本プロジェクトのStorage URLのみ)
+//   - organizationLogoUrl: string | null (任意・自団体の Storage URLのみ)
 //   - fee: string | null (任意・最大100文字)
 //   - capacity: string | null (任意・最大100文字)
 //   - location: string | null (任意・最大200文字)
@@ -67,21 +67,23 @@ rules_version = '2';
 //   - studentName: string (必須・1〜100文字)
 //   - studentFaculty: string (必須・1〜100文字)
 //   - studentGrade: int (必須・1〜10)
-//   - studentIconUrl: string | null (任意・本プロジェクトのStorage URLのみ)
+//   - studentIconUrl: string | null (任意・本人の Storage URLのみ)
 //   - status: string ('applied' | 'accepted' | 'rejected')
 //   - appliedAt / respondedAt: timestamp
 //
 // Collection: scouts/{docId}
-//   - 定型文テンプレートID(0〜4)＋検証済み埋め込み値＋送信元団体整合性＋URL検証
+//   - 定型文テンプレートID(0〜4)＋検証済み埋め込み値＋送信元団体実データ（名前・SNS URL・ロゴURL）完全一致強制
 //
 // Collection: reports/{reportId}
-//   - 通報データ（ホワイトリスト・文字数制限・snapshot内キーおよびサイズ制限）
+//   - 通報データ（ホワイトリスト・文字数制限・レガシー/悪質データ通報を妨げないsnapshot制限）
 //
 // Collection: contacts/{docId}
 //   - userId, category, message(1〜2000文字), status('open'), createdAt(timestamp)
 //
 // Collection: tags/{docId}
 //   - name(1〜100文字), createdAt(timestamp)
+//
+// Server-only Collections: university_email_locks, _account_deletions, admin_notifications
 //
 // ===============================================================
 
@@ -101,7 +103,8 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() &&
-        request.auth.token.get('admin', false) == true;
+        'admin' in request.auth.token &&
+        request.auth.token.admin == true;
     }
 
     // 学生の第2層認証（大学メール確認コード検証）が完了しているかチェック
@@ -111,7 +114,7 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isStudentVerified', false) == true;
     }
 
-    // 団体アカウント（審査中・却下・承認済みすべて含む）が存在するかチェック
+    // 団体アカウント（審査中・却下・停止中・承認済みすべて含む）が存在するかチェック
     function isOrgAccount() {
       return isAuthenticated() &&
         exists(/databases/$(database)/documents/organizations/$(request.auth.uid));
@@ -125,39 +128,74 @@ service cloud.firestore {
     }
 
     // ==========================================================
-    // 共通バリデーション関数（URL・画像・配列・列挙値）
+    // 共通バリデーション関数（Storage パススコープ・URL・配列・列挙値）
+    // ※Firestore の 1,000式評価上限を確実に下回るよう、単一正規表現と集合演算で最小式数に最適化
     // ==========================================================
 
-    // 本プロジェクト（d-scout-6d281）の Firebase Storage 画像URLのみを許可（外部IPロガー・巨大画像対策）
-    function isValidStorageImageUrl(url) {
+    // 学生本人の Storage フォルダ（users/{userId}/icon|photos/...）配下の画像URL検証
+    function isScopedNonEmptyUserImageUrl(url, userId) {
       return url is string &&
         url.size() <= 2048 &&
-        (url == '' ||
-         url.matches('^https://firebasestorage\\.googleapis\\.com/v0/b/d-scout-6d281\\.(firebasestorage\\.app|appspot\\.com)/o/[^\\s<>"]+$'));
+        userId.matches('^[a-zA-Z0-9_-]{1,128}$') &&
+        url.matches('^https://firebasestorage\\.googleapis\\.com/v0/b/d-scout-6d281\\.(firebasestorage\\.app|appspot\\.com)/o/users%2F' + userId + '%2F(icon|photos)%2F[^\\s<>"]+$');
     }
 
-    // ギャラリー写真URLリストの各要素を検証（UI上限4枚＋余裕を持たせて最大6枚）
-    function isValidPhotoUrlList(rawUrls) {
-      let urls = rawUrls;
+    function isScopedUserImageUrl(url, userId) {
+      return url is string && (url == '' || isScopedNonEmptyUserImageUrl(url, userId));
+    }
+
+    function isScopedUserPhotoElements(urls, userId) {
       let n = urls.size();
-      return urls is list
-        && n <= 6
-        && (n < 1 || isValidStorageImageUrl(urls[0]))
-        && (n < 2 || isValidStorageImageUrl(urls[1]))
-        && (n < 3 || isValidStorageImageUrl(urls[2]))
-        && (n < 4 || isValidStorageImageUrl(urls[3]))
-        && (n < 5 || isValidStorageImageUrl(urls[4]))
-        && (n < 6 || isValidStorageImageUrl(urls[5]));
+      return n <= 6
+        && (n < 1 || isScopedNonEmptyUserImageUrl(urls[0], userId))
+        && (n < 2 || isScopedNonEmptyUserImageUrl(urls[1], userId))
+        && (n < 3 || isScopedNonEmptyUserImageUrl(urls[2], userId))
+        && (n < 4 || isScopedNonEmptyUserImageUrl(urls[3], userId))
+        && (n < 5 || isScopedNonEmptyUserImageUrl(urls[4], userId))
+        && (n < 6 || isScopedNonEmptyUserImageUrl(urls[5], userId));
+    }
+
+    function isScopedUserPhotoUrlList(rawUrls, userId) {
+      return rawUrls is list && isScopedUserPhotoElements(rawUrls, userId);
+    }
+
+    // 団体自身の Storage フォルダ（organizations/{orgId}/{folderPattern}/...）配下の画像URL検証
+    function isScopedNonEmptyOrgImageUrl(url, orgId, folderPattern) {
+      return url is string &&
+        url.size() <= 2048 &&
+        orgId.matches('^[a-zA-Z0-9_-]{1,128}$') &&
+        url.matches('^https://firebasestorage\\.googleapis\\.com/v0/b/d-scout-6d281\\.(firebasestorage\\.app|appspot\\.com)/o/organizations%2F' + orgId + '%2F(' + folderPattern + ')%2F[^\\s<>"]+$');
+    }
+
+    function isScopedOrgImageUrl(url, orgId, folderPattern) {
+      return url is string && (url == '' || isScopedNonEmptyOrgImageUrl(url, orgId, folderPattern));
+    }
+
+    function isScopedOrgPhotoElements(urls, orgId) {
+      let n = urls.size();
+      return n <= 6
+        && (n < 1 || isScopedNonEmptyOrgImageUrl(urls[0], orgId, 'photos|logo'))
+        && (n < 2 || isScopedNonEmptyOrgImageUrl(urls[1], orgId, 'photos|logo'))
+        && (n < 3 || isScopedNonEmptyOrgImageUrl(urls[2], orgId, 'photos|logo'))
+        && (n < 4 || isScopedNonEmptyOrgImageUrl(urls[3], orgId, 'photos|logo'))
+        && (n < 5 || isScopedNonEmptyOrgImageUrl(urls[4], orgId, 'photos|logo'))
+        && (n < 6 || isScopedNonEmptyOrgImageUrl(urls[5], orgId, 'photos|logo'));
+    }
+
+    function isScopedOrgPhotoUrlList(rawUrls, orgId) {
+      return rawUrls is list && isScopedOrgPhotoElements(rawUrls, orgId);
     }
 
     // Instagram入力の検証（空文字、@ユーザー名、ユーザー名のみ、instagram.com URLのみ許可）
+    // ※ScoutDetailScreen._handleContact が 'instagram.com' を含む文字列に 'https://' を付与して
+    //   そのまま開く仕様のため、ハンドル分岐側で 'instagram.com' 部分一致（instagram.com.evil.cc等）を明示排除する
     function isValidInstagramUrl(url) {
       return url is string
         && url.size() <= 300
         && (
           url == ''
-          || url.matches('^@?[a-zA-Z0-9._]{1,30}/?$')
-          || url.matches('^(https?://)?(www\\.)?instagram\\.com(/[a-zA-Z0-9._/?=&%-]*)?$')
+          || (!url.matches('(?i).*instagram\\.com.*') && url.matches('^@?[a-zA-Z0-9._]{1,30}/?$'))
+          || url.matches('^(https?://)?(www\\.|m\\.)?instagram\\.com(/[a-zA-Z0-9._/?=&%+#-]*)?$')
         );
     }
 
@@ -186,13 +224,11 @@ service cloud.firestore {
         ]);
     }
 
-    // 興味タグ配列の要素型（string）と全体文字数を低コスト（1000式制限未満）で厳密検査（最大20件）
-    function isValidInterestList(rawItems) {
-      let items = rawItems;
+    // 興味タグ配列の要素型（string）・空文字禁止・各要素100文字以下・合計1000文字以下を最小式数で検証（最大20件）
+    function isValidInterestElements(items) {
       let n = items.size();
-      return items is list
-        && n <= 20
-        && items.join('').size() <= 1000
+      return n <= 20
+        && !('' in items)
         && (n < 1 || items[0] is string)
         && (n < 2 || items[1] is string)
         && (n < 3 || items[2] is string)
@@ -212,7 +248,13 @@ service cloud.firestore {
         && (n < 17 || items[16] is string)
         && (n < 18 || items[17] is string)
         && (n < 19 || items[18] is string)
-        && (n < 20 || items[19] is string);
+        && (n < 20 || items[19] is string)
+        && items.join('').size() <= 1000
+        && !items.join('\n').matches('(?s).*[^\n]{101,}.*');
+    }
+
+    function isValidInterestList(rawItems) {
+      return rawItems is list && isValidInterestElements(rawItems);
     }
 
     function isValidBlockDoc(blockedId) {
@@ -225,18 +267,34 @@ service cloud.firestore {
     }
 
     // ==========================================================
+    // サーバー専用コレクション（クライアントアクセス完全拒否 / 監査読み取りのみ）
+    // ==========================================================
+    match /university_email_locks/{lockId} {
+      allow read, write: if false;
+    }
+
+    match /_account_deletions/{uid} {
+      allow read, write: if false;
+    }
+
+    match /admin_notifications/{notificationId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ==========================================================
     // users コレクション
     // ==========================================================
     match /users/{userId} {
-      // users プロフィール各フィールドの型・サイズ検証（省略・nullはレガシー互換のため許容）
-      function isValidUserFields(d) {
+      // users プロフィール各フィールドの型・サイズ・Storageオーナースコープ検証（未変更の既存値は維持許容）
+      function isValidUserUpdateFields(d) {
         return (!('name' in d) || d.name == null || (d.name is string && d.name.size() <= 100))
           && (!('faculty' in d) || d.faculty == null || (d.faculty is string && d.faculty.size() <= 100))
           && (!('grade' in d) || d.grade == null || (d.grade is int && d.grade >= 1 && d.grade <= 10))
           && (!('mainCampus' in d) || d.mainCampus == null || isValidCampus(d.mainCampus))
-          && (!('interests' in d) || d.interests == null || isValidInterestList(d.interests))
-          && (!('iconUrl' in d) || d.iconUrl == null || isValidStorageImageUrl(d.iconUrl))
-          && (!('photoUrls' in d) || d.photoUrls == null || isValidPhotoUrlList(d.photoUrls));
+          && (!('interests' in d) || d.interests == null || d.interests == resource.data.get('interests', null) || isValidInterestList(d.interests))
+          && (!('iconUrl' in d) || d.iconUrl == null || d.iconUrl == resource.data.get('iconUrl', null) || isScopedUserImageUrl(d.iconUrl, userId))
+          && (!('photoUrls' in d) || d.photoUrls == null || d.photoUrls == resource.data.get('photoUrls', null) || isScopedUserPhotoUrlList(d.photoUrls, userId));
       }
 
       // 本人・承認済み団体・管理者のみ閲覧可能
@@ -260,7 +318,7 @@ service cloud.firestore {
              'name', 'faculty', 'grade', 'mainCampus',
              'interests', 'iconUrl', 'photoUrls'
            ])
-        && isValidUserFields(request.resource.data);
+        && isValidUserUpdateFields(request.resource.data);
 
       allow delete: if isAdmin() || isOwner(userId);
 
@@ -286,7 +344,7 @@ service cloud.firestore {
     // organizations コレクション
     // ==========================================================
     match /organizations/{docId} {
-      function isValidOrgFields(d) {
+      function isValidOrgBaseFields(d) {
         return (!('id' in d) || d.id == null || (d.id is string && d.id == docId))
           && ('name' in d && d.name is string && d.name.size() >= 1 && d.name.size() <= 100)
           && (!('description' in d) || d.description == null || (d.description is string && d.description.size() <= 2000))
@@ -295,12 +353,23 @@ service cloud.firestore {
           && (!('logoEmoji' in d) || d.logoEmoji == null || (d.logoEmoji is string && d.logoEmoji.size() <= 20))
           && (!('instagramUrl' in d) || d.instagramUrl == null || isValidInstagramUrl(d.instagramUrl))
           && (!('groupLineUrl' in d) || d.groupLineUrl == null || isValidGroupLineUrl(d.groupLineUrl))
-          && (!('logoUrl' in d) || d.logoUrl == null || isValidStorageImageUrl(d.logoUrl))
-          && (!('proofImageUrl' in d) || d.proofImageUrl == null || isValidStorageImageUrl(d.proofImageUrl))
-          && (!('photoUrls' in d) || d.photoUrls == null || isValidPhotoUrlList(d.photoUrls))
           && (!('isOfficial' in d) || d.isOfficial is bool)
           && (!('createdAt' in d) || d.createdAt == null || d.createdAt is timestamp ||
               (d.createdAt is string && d.createdAt.size() <= 40));
+      }
+
+      function isValidOrgCreateFields(d) {
+        return isValidOrgBaseFields(d)
+          && (!('logoUrl' in d) || d.logoUrl == null || isScopedOrgImageUrl(d.logoUrl, docId, 'logo|photos'))
+          && (!('proofImageUrl' in d) || d.proofImageUrl == null || isScopedOrgImageUrl(d.proofImageUrl, docId, 'proof|photos'))
+          && (!('photoUrls' in d) || d.photoUrls == null || isScopedOrgPhotoUrlList(d.photoUrls, docId));
+      }
+
+      function isValidOrgUpdateFields(d) {
+        return isValidOrgBaseFields(d)
+          && (!('logoUrl' in d) || d.logoUrl == null || d.logoUrl == resource.data.get('logoUrl', null) || isScopedOrgImageUrl(d.logoUrl, docId, 'logo|photos'))
+          && (!('proofImageUrl' in d) || d.proofImageUrl == null || d.proofImageUrl == resource.data.get('proofImageUrl', null) || isScopedOrgImageUrl(d.proofImageUrl, docId, 'proof|photos'))
+          && (!('photoUrls' in d) || d.photoUrls == null || d.photoUrls == resource.data.get('photoUrls', null) || isScopedOrgPhotoUrlList(d.photoUrls, docId));
       }
 
       // 個別取得:
@@ -330,7 +399,7 @@ service cloud.firestore {
         && request.resource.data.representativeId == request.auth.uid
         && (!('verifiedAt' in request.resource.data) || request.resource.data.verifiedAt == null)
         && (!('isOfficial' in request.resource.data) || request.resource.data.isOfficial == false)
-        && isValidOrgFields(request.resource.data);
+        && isValidOrgCreateFields(request.resource.data);
 
       // 更新: 管理者はステータス変更可能、オーナーはプロフィール項目のみ更新可能（自己承認・公認詐称不可）
       allow update: if isAdmin() || (
@@ -339,7 +408,7 @@ service cloud.firestore {
              'id', 'name', 'description', 'categories', 'campus', 'logoEmoji',
              'instagramUrl', 'groupLineUrl', 'logoUrl', 'proofImageUrl', 'photoUrls'
            ])
-        && isValidOrgFields(request.resource.data)
+        && isValidOrgUpdateFields(request.resource.data)
       );
 
       // 削除: 管理者または団体オーナー本人
@@ -374,7 +443,7 @@ service cloud.firestore {
         return get(/databases/$(database)/documents/organizations/$(request.auth.uid)).data.get('name', '');
       }
 
-      function isValidEventFields(d) {
+      function isValidEventBaseFields(d) {
         return d.organizationId == request.auth.uid
           && ('title' in d && d.title is string && d.title.size() >= 1 && d.title.size() <= 100)
           && (!('description' in d) || d.description == null || (d.description is string && d.description.size() <= 2000))
@@ -383,7 +452,6 @@ service cloud.firestore {
           && (!('organizationEmoji' in d) || d.organizationEmoji == null || (d.organizationEmoji is string && d.organizationEmoji.size() <= 20))
           && (!('organizationCategory' in d) || d.organizationCategory == null || (d.organizationCategory is string && d.organizationCategory.size() <= 30))
           && (!('categories' in d) || d.categories == null || isValidOrgCategoryList(d.categories))
-          && (!('organizationLogoUrl' in d) || d.organizationLogoUrl == null || isValidStorageImageUrl(d.organizationLogoUrl))
           && (!('fee' in d) || d.fee == null || (d.fee is string && d.fee.size() <= 100))
           && (!('capacity' in d) || d.capacity == null || (d.capacity is string && d.capacity.size() <= 100))
           && (!('location' in d) || d.location == null || (d.location is string && d.location.size() <= 200))
@@ -407,12 +475,17 @@ service cloud.firestore {
              'startAt', 'campus', 'organizationLogoUrl', 'fee', 'capacity',
              'location', 'groupLineUrl', 'createdAt', 'updatedAt'
            ])
-        && isValidEventFields(request.resource.data)
+        && isValidEventBaseFields(request.resource.data)
+        && (!('organizationLogoUrl' in request.resource.data) ||
+            request.resource.data.organizationLogoUrl == null ||
+            isScopedOrgImageUrl(request.resource.data.organizationLogoUrl, request.auth.uid, 'logo|photos'))
         && request.resource.data.startAt > request.time - duration.value(15, 'm')
         && (!('organizationName' in request.resource.data) ||
             request.resource.data.organizationName == currentOrgName());
 
-      // 更新: 主催団体（承認済み）のみ。過去日時への巻き戻しや他団体名への詐称を禁止
+      // 更新: 主催団体（承認済み）のみ。
+      // - 未来イベントを過去日時へ巻き戻す行為は禁止しつつ、EventEditScreen の TimeOfDay 変換による秒・ミリ秒切り捨て（最大60秒）を許容
+      // - organizationName 欠落の旧イベント更新時は Event.fromFirestore のフォールバック値 'Unknown' も許容
       allow update: if isVerifiedOrg()
         && resource.data.organizationId == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -421,12 +494,18 @@ service cloud.firestore {
              'organizationLogoUrl', 'fee', 'capacity', 'location',
              'groupLineUrl', 'updatedAt'
            ])
-        && isValidEventFields(request.resource.data)
+        && isValidEventBaseFields(request.resource.data)
+        && (!('organizationLogoUrl' in request.resource.data) ||
+            request.resource.data.organizationLogoUrl == null ||
+            request.resource.data.organizationLogoUrl == resource.data.get('organizationLogoUrl', null) ||
+            isScopedOrgImageUrl(request.resource.data.organizationLogoUrl, request.auth.uid, 'logo|photos'))
         && (request.resource.data.startAt > request.time - duration.value(15, 'm') ||
-            request.resource.data.startAt == resource.data.get('startAt', null))
+            ('startAt' in resource.data &&
+             resource.data.startAt is timestamp &&
+             request.resource.data.startAt >= resource.data.startAt - duration.value(1, 'm')))
         && (!('organizationName' in request.resource.data) ||
             request.resource.data.organizationName == currentOrgName() ||
-            request.resource.data.organizationName == resource.data.get('organizationName', ''));
+            request.resource.data.organizationName == resource.data.get('organizationName', 'Unknown'));
 
       allow delete: if isAdmin() ||
         (isVerifiedOrg() && resource.data.organizationId == request.auth.uid);
@@ -453,7 +532,7 @@ service cloud.firestore {
             && d.studentName is string && d.studentName.size() >= 1 && d.studentName.size() <= 100
             && d.studentFaculty is string && d.studentFaculty.size() >= 1 && d.studentFaculty.size() <= 100
             && d.studentGrade is int && d.studentGrade >= 1 && d.studentGrade <= 10
-            && (!('studentIconUrl' in d) || d.studentIconUrl == null || isValidStorageImageUrl(d.studentIconUrl))
+            && (!('studentIconUrl' in d) || d.studentIconUrl == null || isScopedUserImageUrl(d.studentIconUrl, request.auth.uid))
             && d.status == 'applied'
             && d.appliedAt is timestamp;
         }
@@ -509,6 +588,8 @@ service cloud.firestore {
 
       function isValidScoutCreate() {
         let d = request.resource.data;
+        let org = senderOrg();
+        let target = scoutTarget();
         return d.keys().hasAll(['targetUserId', 'organizationId', 'templateId', 'isRead'])
           && d.keys().hasOnly([
               'targetUserId', 'organizationId', 'organizationName',
@@ -521,19 +602,24 @@ service cloud.firestore {
           && d.targetUserId is string
           && d.targetUserId.size() >= 1 && d.targetUserId.size() <= 128
           && exists(/databases/$(database)/documents/users/$(d.targetUserId))
-          && scoutTarget().get('isStudentVerified', false) == true
+          && target.get('isStudentVerified', false) == true
           && d.isRead == false
           && (!('readAt' in d) || d.readAt == null)
           && (!('sentAt' in d) || d.sentAt is timestamp)
-          // 団体名のなりすまし・自由記述混入を禁止（自団体の実名と完全一致を強制）
-          && (!('organizationName' in d) || d.organizationName == senderOrg().get('name', ''))
+          // 団体名のなりすまし・空文字匿名化・自由記述混入を禁止（自団体の実名と完全一致を強制）
+          && (!('organizationName' in d) ||
+              (d.organizationName is string && d.organizationName.size() >= 1 && d.organizationName == org.get('name', '')))
           && (!('organizationEmoji' in d) || (d.organizationEmoji is string && d.organizationEmoji.size() <= 20))
           && (!('organizationCategory' in d) || (d.organizationCategory is string && d.organizationCategory.size() <= 30))
-          // URLのフィッシング・外部IPロガー対策
-          && (!('organizationInstagramUrl' in d) || d.organizationInstagramUrl == null || isValidInstagramUrl(d.organizationInstagramUrl))
-          && (!('organizationGroupLineUrl' in d) || d.organizationGroupLineUrl == null || isValidGroupLineUrl(d.organizationGroupLineUrl))
-          && (!('organizationLogoUrl' in d) || d.organizationLogoUrl == null || isValidStorageImageUrl(d.organizationLogoUrl))
-          && (!('targetUserIconUrl' in d) || d.targetUserIconUrl == null || isValidStorageImageUrl(d.targetUserIconUrl))
+          // URLのフィッシング・裏連絡先すり替え・外部IPロガー対策（公開団体情報・対象学生情報との一致を強制）
+          && (!('organizationInstagramUrl' in d) || d.organizationInstagramUrl == null ||
+              (isValidInstagramUrl(d.organizationInstagramUrl) && d.organizationInstagramUrl == org.get('instagramUrl', '')))
+          && (!('organizationGroupLineUrl' in d) || d.organizationGroupLineUrl == null || d.organizationGroupLineUrl == '' ||
+              (isValidGroupLineUrl(d.organizationGroupLineUrl) && d.organizationGroupLineUrl == org.get('groupLineUrl', '')))
+          && (!('organizationLogoUrl' in d) || d.organizationLogoUrl == null ||
+              (isScopedOrgImageUrl(d.organizationLogoUrl, request.auth.uid, 'logo|photos') && d.organizationLogoUrl == org.get('logoUrl', null)))
+          && (!('targetUserIconUrl' in d) || d.targetUserIconUrl == null ||
+              (isScopedUserImageUrl(d.targetUserIconUrl, d.targetUserId) && d.targetUserIconUrl == target.get('iconUrl', null)))
           && (!('targetUserName' in d) || d.targetUserName == null || (d.targetUserName is string && d.targetUserName.size() <= 100))
           && d.templateId is int
           && d.templateId >= 0
@@ -543,7 +629,7 @@ service cloud.firestore {
             (d.templateId == 0
               && d.templateArg is string
               && d.templateArg.size() <= 100
-              && d.templateArg in scoutTarget().get('interests', []))
+              && d.templateArg in target.get('interests', []))
             // 1: イベントに招待 → 自団体の公開中イベント（過去日時の隠しイベントは不可）かつタイトル一致
             || (d.templateId == 1
               && d.templateArg is string
@@ -557,11 +643,11 @@ service cloud.firestore {
             // 2: 同じキャンパス → 対象学生の登録キャンパスと一致
             || (d.templateId == 2
               && d.templateArg is string
-              && d.templateArg == scoutTarget().get('mainCampus', ''))
+              && d.templateArg == target.get('mainCampus', ''))
             // 3: 学年を歓迎 → 対象学生の学年と一致
             || (d.templateId == 3
               && d.templateArg is string
-              && d.templateArg == string(scoutTarget().get('grade', 0)))
+              && d.templateArg == string(target.get('grade', 0)))
             // 4: 見学のお誘い → 埋め込む値を持たない
             || (d.templateId == 4
               && !d.keys().hasAny(['templateArg', 'templateEventId']))
@@ -602,33 +688,42 @@ service cloud.firestore {
     // reports コレクション（通報）
     // ==========================================================
     match /reports/{reportId} {
+      function isBoundedStringList(items, maxLen, maxJoinedSize) {
+        return items is list
+          && items.size() <= maxLen
+          && items.join('').size() <= maxJoinedSize;
+      }
+
+      // 通報スナップショットの検証:
+      // 1MB容量爆弾や未知キー混入は確実に遮断しつつ、ルール導入前の長文・複数画像を持つ
+      // 悪質プロフィールを通報しようとした被害者が弾かれないよう十分な上限幅を持たせる
       function isValidReportSnapshot(s) {
         return s is map
-          && s.size() <= 15
+          && s.size() <= 20
           && s.keys().hasOnly([
                'name', 'description', 'categories', 'campus', 'instagramUrl',
                'logoUrl', 'photoUrls', 'scoutId', 'organizationName', 'body',
                'templateId', 'templateArg', 'sentAt', 'faculty', 'grade',
                'mainCampus', 'interests', 'iconUrl'
              ])
-          && (!('name' in s) || (s.name is string && s.name.size() <= 200))
-          && (!('description' in s) || (s.description is string && s.description.size() <= 3000))
-          && (!('body' in s) || (s.body is string && s.body.size() <= 1000))
-          && (!('organizationName' in s) || (s.organizationName is string && s.organizationName.size() <= 200))
+          && (!('name' in s) || (s.name is string && s.name.size() <= 500))
+          && (!('description' in s) || (s.description is string && s.description.size() <= 10000))
+          && (!('body' in s) || (s.body is string && s.body.size() <= 5000))
+          && (!('organizationName' in s) || (s.organizationName is string && s.organizationName.size() <= 500))
           && (!('scoutId' in s) || (s.scoutId is string && s.scoutId.size() <= 128))
-          && (!('templateId' in s) || s.templateId is int)
-          && (!('templateArg' in s) || (s.templateArg is string && s.templateArg.size() <= 200))
+          && (!('templateId' in s) || s.templateId == null || s.templateId is int)
+          && (!('templateArg' in s) || s.templateArg == null || (s.templateArg is string && s.templateArg.size() <= 500))
           && (!('sentAt' in s) || (s.sentAt is string && s.sentAt.size() <= 60))
-          && (!('campus' in s) || (s.campus is string && s.campus.size() <= 50))
-          && (!('instagramUrl' in s) || (s.instagramUrl is string && s.instagramUrl.size() <= 300))
+          && (!('campus' in s) || (s.campus is string && s.campus.size() <= 100))
+          && (!('instagramUrl' in s) || (s.instagramUrl is string && s.instagramUrl.size() <= 1000))
           && (!('logoUrl' in s) || s.logoUrl == null || (s.logoUrl is string && s.logoUrl.size() <= 2048))
           && (!('iconUrl' in s) || s.iconUrl == null || (s.iconUrl is string && s.iconUrl.size() <= 2048))
-          && (!('faculty' in s) || (s.faculty is string && s.faculty.size() <= 100))
+          && (!('faculty' in s) || (s.faculty is string && s.faculty.size() <= 200))
           && (!('grade' in s) || s.grade is int)
-          && (!('mainCampus' in s) || (s.mainCampus is string && s.mainCampus.size() <= 50))
-          && (!('categories' in s) || (s.categories is list && s.categories.size() <= 25 && s.categories.join('').size() <= 500))
-          && (!('interests' in s) || (s.interests is list && s.interests.size() <= 30 && s.interests.join('').size() <= 1000))
-          && (!('photoUrls' in s) || (s.photoUrls is list && s.photoUrls.size() <= 6 && s.photoUrls.join('').size() <= 10000));
+          && (!('mainCampus' in s) || (s.mainCampus is string && s.mainCampus.size() <= 100))
+          && (!('categories' in s) || isBoundedStringList(s.categories, 50, 2000))
+          && (!('interests' in s) || isBoundedStringList(s.interests, 100, 5000))
+          && (!('photoUrls' in s) || isBoundedStringList(s.photoUrls, 20, 20000));
       }
 
       function isValidReport() {
@@ -644,7 +739,8 @@ service cloud.firestore {
           && d.reporterId == request.auth.uid
           && d.targetId is string && d.targetId.size() >= 1 && d.targetId.size() <= 128
           && d.targetId != request.auth.uid
-          && d.targetName is string && d.targetName.size() >= 1 && d.targetName.size() <= 200
+          // 旧スカウト等で organizationName が空文字の場合も通報できるよう空文字（size >= 0）を許容
+          && d.targetName is string && d.targetName.size() <= 500
           && ((d.reporterRole == 'student' && isVerifiedStudent()) ||
               (d.reporterRole == 'organization' && isVerifiedOrg()))
           && d.targetType in ['user', 'organization']

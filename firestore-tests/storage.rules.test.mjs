@@ -24,7 +24,7 @@ import {
   assertFails,
 } from "@firebase/rules-unit-testing";
 import { doc, setDoc } from "firebase/firestore";
-import { ref, uploadBytes, getBytes, deleteObject } from "firebase/storage";
+import { ref, uploadBytes, getBytes, deleteObject, listAll } from "firebase/storage";
 
 const PROJECT_ID = process.env.GCLOUD_PROJECT || "d-scout-rules-test";
 
@@ -314,3 +314,18 @@ test("[互換性2] 審査待ち/却下団体は自団体のロゴ・活動写真
     ));
   }
 });
+
+test("[P0-2 強化] 一般ユーザー（認証済み学生・承認済み団体）は Storage フォルダのファイル一覧列挙（listAll）ができない（管理者は可）", async () => {
+  await seedStorageHardeningFixtures();
+
+  // 他人の写真フォルダやアイコンフォルダを列挙して削除済み過去写真を抜く攻撃を遮断
+  await assertFails(listAll(ref(as(OTHER_STUDENT), `users/${STUDENT}/photos`)));
+  await assertFails(listAll(ref(as(ORG_VERIFIED), `users/${STUDENT}/photos`)));
+  await assertFails(listAll(ref(as(STUDENT), `organizations/${ORG_VERIFIED}/logo`)));
+  await assertFails(listAll(ref(as(STUDENT), `organizations/${ORG_PENDING}/photos`)));
+
+  // 管理者は監査・運用のため一覧取得も可能
+  await assertSucceeds(listAll(ref(asAdmin(), `users/${STUDENT}/photos`)));
+  await assertSucceeds(listAll(ref(asAdmin(), `organizations/${ORG_VERIFIED}/logo`)));
+});
+
