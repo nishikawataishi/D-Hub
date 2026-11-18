@@ -2038,4 +2038,398 @@ test("[互換性11] 変更不可の管理フィールドや未変更フィール
   ));
 });
 
+// ==========================================================
+// 11. PR #57 レビュー必須1対応：既存本番レガシーデータの後方互換性と変更時遮断の両立
+// ==========================================================
+
+test("[必須1・後方互換] linktr.ee・空白入りハンドル・http LINE・2001文字超descriptionを持つ既存団体のupdateOrgProfile/sendScoutおよび2500文字イベント作成がすべて通る", async () => {
+  const ORG_LINKTREE = "legacy_org_linktree";
+  const ORG_SPACED_HANDLE = "legacy_org_spaced_handle";
+  const STUDENT_LONG_TEXT = "legacy_student_long_text";
+  const futureDate = Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+  const longOrgDescription = "あ".repeat(2500);
+  const longEventDescription = "い".repeat(2500);
+  const longLegacyName = "う".repeat(120);
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    // linktr.ee の instagramUrl、http:// の groupLineUrl、2500文字の description を持つ既存承認済み団体
+    await setDoc(doc(db, "organizations", ORG_LINKTREE), {
+      name: "既存リンクツリー団体",
+      description: longOrgDescription,
+      categories: ["sports"],
+      campus: "imadegawa",
+      logoEmoji: "🏀",
+      instagramUrl: "https://linktr.ee/doshisha_bball_circle",
+      groupLineUrl: "http://line.me/ti/g/legacy_http_group",
+      logoUrl: null,
+      photoUrls: [],
+      status: "verified",
+      representativeId: ORG_LINKTREE,
+      createdAt: Timestamp.now(),
+    });
+
+    // スペース入りハンドルの instagramUrl と120文字の団体名を持つ既存団体
+    await setDoc(doc(db, "organizations", ORG_SPACED_HANDLE), {
+      name: longLegacyName,
+      description: "既存紹介文",
+      categories: ["music"],
+      campus: "kyotanabe",
+      logoEmoji: "🎸",
+      instagramUrl: "@doshisha light music",
+      groupLineUrl: "",
+      logoUrl: null,
+      photoUrls: [],
+      status: "verified",
+      representativeId: ORG_SPACED_HANDLE,
+      createdAt: Timestamp.now(),
+    });
+
+    // 120文字の名前・学部を持つ既存認証済み学生
+    await setDoc(doc(db, "users", STUDENT_LONG_TEXT), {
+      name: longLegacyName,
+      faculty: "え".repeat(120),
+      grade: 2,
+      mainCampus: "imadegawa",
+      interests: ["バスケ"],
+      photoUrls: [],
+      isStudentVerified: true,
+      createdAt: Timestamp.now(),
+    });
+
+    // http:// の groupLineUrl と 6000文字の description を持つ既存イベント
+    await setDoc(doc(db, "events", "legacy_long_http_event"), {
+      organizationId: ORG_LINKTREE,
+      organizationName: "既存リンクツリー団体",
+      organizationEmoji: "🏀",
+      organizationCategory: "スポーツ",
+      title: "お".repeat(120),
+      description: "か".repeat(6000),
+      startAt: futureDate,
+      campus: "imadegawa",
+      groupLineUrl: "http://line.me/ti/g/legacy_event_http",
+      createdAt: Timestamp.now(),
+    });
+  });
+
+  const newPhotoUrl =
+    `https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/organizations%2F${ORG_LINKTREE}%2Fphotos%2Fp1.jpg?alt=media&token=1`;
+
+  // 1) instagramUrl が linktr.ee、groupLineUrl が http://、description が 2500文字の団体が
+  //    それらの値を変更せずに写真を更新する updateOrgProfile が通る
+  await assertSucceeds(updateDoc(doc(as(ORG_LINKTREE), "organizations", ORG_LINKTREE), {
+    name: "既存リンクツリー団体",
+    description: longOrgDescription,
+    categories: ["sports"],
+    campus: "imadegawa",
+    logoEmoji: "🏀",
+    instagramUrl: "https://linktr.ee/doshisha_bball_circle",
+    groupLineUrl: "http://line.me/ti/g/legacy_http_group",
+    logoUrl: null,
+    photoUrls: [newPhotoUrl],
+  }));
+
+  // 2) instagramUrl がスペース入りハンドル・団体名が120文字の団体が紹介文だけ更新する updateOrgProfile が通る
+  await assertSucceeds(updateDoc(doc(as(ORG_SPACED_HANDLE), "organizations", ORG_SPACED_HANDLE), {
+    name: longLegacyName,
+    description: "新歓日程を追記しました！",
+    categories: ["music"],
+    campus: "kyotanabe",
+    logoEmoji: "🎸",
+    instagramUrl: "@doshisha light music",
+    groupLineUrl: "",
+    logoUrl: null,
+    photoUrls: [],
+  }));
+
+  // 3) description が 2500 文字のイベントを新規作成できる（createEvent）
+  await assertSucceeds(addDoc(collection(as(ORG_LINKTREE), "events"), {
+    organizationId: ORG_LINKTREE,
+    organizationName: "既存リンクツリー団体",
+    organizationEmoji: "🏀",
+    organizationCategory: "スポーツ",
+    title: "新歓体験会・説明会",
+    description: longEventDescription,
+    startAt: futureDate,
+    campus: "imadegawa",
+    fee: "無料",
+    capacity: "30名",
+    location: "今出川キャンパス デイヴィス記念館",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }));
+
+  // 4) 既存イベントの長文 title / description / http LINE URL を変更せずに場所だけ更新する updateEvent が通る
+  await assertSucceeds(updateDoc(doc(as(ORG_LINKTREE), "events", "legacy_long_http_event"), {
+    organizationId: ORG_LINKTREE,
+    organizationName: "既存リンクツリー団体",
+    organizationEmoji: "🏀",
+    organizationCategory: "スポーツ",
+    title: "お".repeat(120),
+    description: "か".repeat(6000),
+    startAt: futureDate,
+    campus: "imadegawa",
+    fee: "無料",
+    capacity: "20名",
+    location: "変更後の集合場所",
+    groupLineUrl: "http://line.me/ti/g/legacy_event_http",
+    updatedAt: serverTimestamp(),
+  }));
+
+  // 5) instagramUrl が linktr.ee かつ groupLineUrl が http:// の団体がスカウトを送信できる（sendScout）
+  await assertSucceeds(addDoc(collection(as(ORG_LINKTREE), "scouts"), {
+    targetUserId: STUDENT,
+    organizationId: ORG_LINKTREE,
+    organizationName: "既存リンクツリー団体",
+    organizationEmoji: "🏀",
+    organizationCategory: "スポーツ",
+    templateId: 0,
+    templateArg: "スポーツ",
+    isRead: false,
+    readAt: null,
+    sentAt: serverTimestamp(),
+    organizationInstagramUrl: "https://linktr.ee/doshisha_bball_circle",
+    organizationGroupLineUrl: "http://line.me/ti/g/legacy_http_group",
+    targetUserName: "学生A",
+  }));
+
+  // 6) スペース入りハンドル・120文字団体名の団体から、120文字氏名の既存学生へスカウトを送信できる
+  await assertSucceeds(addDoc(collection(as(ORG_SPACED_HANDLE), "scouts"), {
+    targetUserId: STUDENT_LONG_TEXT,
+    organizationId: ORG_SPACED_HANDLE,
+    organizationName: longLegacyName,
+    organizationEmoji: "🎸",
+    organizationCategory: "音楽",
+    templateId: 2,
+    templateArg: "imadegawa",
+    isRead: false,
+    readAt: null,
+    sentAt: serverTimestamp(),
+    organizationInstagramUrl: "@doshisha light music",
+    targetUserName: longLegacyName,
+  }));
+
+  // 7) 120文字の名前・学部を持つ既存学生が興味タグやイベント参加申込を実行できる
+  await assertSucceeds(setDoc(
+    doc(as(STUDENT_LONG_TEXT), "users", STUDENT_LONG_TEXT),
+    { interests: ["バスケ", "音楽"] },
+    { merge: true },
+  ));
+  await assertSucceeds(setDoc(
+    doc(as(STUDENT_LONG_TEXT), "events", "legacy_long_http_event", "applications", STUDENT_LONG_TEXT),
+    {
+      studentId: STUDENT_LONG_TEXT,
+      studentName: longLegacyName,
+      studentFaculty: "え".repeat(120),
+      studentGrade: 2,
+      status: "applied",
+      appliedAt: serverTimestamp(),
+    },
+  ));
+});
+
+test("[必須1＆2・境界値と申請互換] OrgCreateScreen申請updateおよび文字数境界値（2000/2001、5000/5001、スカウトSNS型不正）の検証", async () => {
+  const ORG_SIGNUP_TEMP = "org_signup_temp_uid";
+  const futureDate = Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "organizations", ORG_SIGNUP_TEMP), {
+      name: "団体名未設定",
+      description: "",
+      categories: ["culture"],
+      campus: "both",
+      logoEmoji: "🎨",
+      instagramUrl: "",
+      groupLineUrl: "",
+      isOfficial: false,
+      photoUrls: [],
+      status: "pending",
+      representativeId: ORG_SIGNUP_TEMP,
+      createdAt: Timestamp.now(),
+    });
+  });
+
+  // 1) サインアップ直後の仮ドキュメントに対して OrgCreateScreen.saveOrganization と同等の申請 update が通る
+  const proofUrl =
+    `https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/organizations%2F${ORG_SIGNUP_TEMP}%2Fphotos%2Fproof_1.jpg?alt=media&token=abc`;
+  await assertSucceeds(setDoc(
+    doc(as(ORG_SIGNUP_TEMP), "organizations", ORG_SIGNUP_TEMP),
+    {
+      id: ORG_SIGNUP_TEMP,
+      name: "新規申請バドミントンサークル",
+      description: "審査後にプロフィールを編集できます。",
+      categories: ["sports", "beginner"],
+      campus: "both",
+      logoEmoji: "🎨",
+      instagramUrl: "https://www.instagram.com/doshisha_badminton/",
+      groupLineUrl: "",
+      logoUrl: null,
+      representativeId: ORG_SIGNUP_TEMP,
+      status: "pending",
+      proofImageUrl: proofUrl,
+      verifiedAt: null,
+      isOfficial: false,
+      createdAt: new Date().toISOString(),
+      photoUrls: [],
+    },
+    { merge: true },
+  ));
+
+  // 2) organizations.description の境界値: 0文字・2000文字は許可、2001文字への新規変更は拒否
+  await assertSucceeds(updateDoc(doc(as(ORG_VERIFIED), "organizations", ORG_VERIFIED), {
+    description: "",
+  }));
+  await assertSucceeds(updateDoc(doc(as(ORG_VERIFIED), "organizations", ORG_VERIFIED), {
+    description: "あ".repeat(2000),
+  }));
+  await assertFails(updateDoc(doc(as(ORG_VERIFIED), "organizations", ORG_VERIFIED), {
+    description: "あ".repeat(2001),
+  }));
+
+  // 3) events.description の境界値: 0文字・5000文字は許可、5001文字は拒否
+  await assertSucceeds(addDoc(collection(as(ORG_VERIFIED), "events"), {
+    organizationId: ORG_VERIFIED,
+    organizationName: "承認済み団体",
+    title: "境界値5000文字テスト",
+    description: "い".repeat(5000),
+    startAt: futureDate,
+    campus: "imadegawa",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }));
+  await assertFails(addDoc(collection(as(ORG_VERIFIED), "events"), {
+    organizationId: ORG_VERIFIED,
+    organizationName: "承認済み団体",
+    title: "境界値5001文字テスト",
+    description: "い".repeat(5001),
+    startAt: futureDate,
+    campus: "imadegawa",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }));
+
+  // 4) scouts の organizationInstagramUrl / organizationGroupLineUrl に非string型は設定不可
+  await assertFails(addDoc(collection(as(ORG_VERIFIED), "scouts"), {
+    targetUserId: STUDENT,
+    organizationId: ORG_VERIFIED,
+    organizationName: "承認済み団体",
+    templateId: 4,
+    isRead: false,
+    sentAt: serverTimestamp(),
+    organizationInstagramUrl: 12345,
+  }));
+});
+
+test("[必須1・攻撃遮断] レガシー値維持を許可しても、別の不正URL・制限超え長文への書き換えやスカウト裏URL差し込みは遮断される", async () => {
+  const ORG_LEGACY_STRICT = "legacy_org_strict_check";
+  const futureDate = Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "organizations", ORG_LEGACY_STRICT), {
+      name: "検証用レガシー団体",
+      description: "あ".repeat(2500),
+      categories: ["sports"],
+      campus: "imadegawa",
+      logoEmoji: "🏀",
+      instagramUrl: "https://linktr.ee/original_circle",
+      groupLineUrl: "http://line.me/ti/g/original_legacy",
+      status: "verified",
+      representativeId: ORG_LEGACY_STRICT,
+      verifiedAt: Timestamp.now(),
+      createdAt: Timestamp.now(),
+    });
+  });
+
+  // 1) 既存の linktr.ee から「別の」linktr.ee や外部サイトへの変更は拒否
+  await assertFails(updateDoc(doc(as(ORG_LEGACY_STRICT), "organizations", ORG_LEGACY_STRICT), {
+    instagramUrl: "https://linktr.ee/modified_other_link",
+  }));
+
+  // 2) 既存の http:// LINE URL から「別の」http:// URL への変更は拒否
+  await assertFails(updateDoc(doc(as(ORG_LEGACY_STRICT), "organizations", ORG_LEGACY_STRICT), {
+    groupLineUrl: "http://line.me/ti/g/modified_http_link",
+  }));
+
+  // 3) 既存の 2500 文字 description から「別の」2500 文字（>2000文字）への変更は拒否
+  await assertFails(updateDoc(doc(as(ORG_LEGACY_STRICT), "organizations", ORG_LEGACY_STRICT), {
+    description: "べ".repeat(2500),
+  }));
+
+  // 4) スカウト送信時に登録済みの linktr.ee と異なるURLを差し込む攻撃は拒否
+  await assertFails(addDoc(collection(as(ORG_LEGACY_STRICT), "scouts"), {
+    targetUserId: STUDENT,
+    organizationId: ORG_LEGACY_STRICT,
+    organizationName: "検証用レガシー団体",
+    organizationEmoji: "🏀",
+    organizationCategory: "スポーツ",
+    templateId: 4,
+    isRead: false,
+    sentAt: serverTimestamp(),
+    organizationInstagramUrl: "https://linktr.ee/evil_override",
+  }));
+
+  // 5) イベント作成で上限（5000文字）を超える巨大 description は拒否
+  await assertFails(addDoc(collection(as(ORG_LEGACY_STRICT), "events"), {
+    organizationId: ORG_LEGACY_STRICT,
+    organizationName: "検証用レガシー団体",
+    title: "容量爆弾テスト",
+    description: "あ".repeat(6000),
+    startAt: futureDate,
+    campus: "imadegawa",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }));
+
+  // 6) 承認済み団体による createdAt や verifiedAt の変更・消去は拒否
+  await assertFails(updateDoc(doc(as(ORG_LEGACY_STRICT), "organizations", ORG_LEGACY_STRICT), {
+    createdAt: new Date().toISOString(),
+  }));
+  await assertFails(updateDoc(doc(as(ORG_LEGACY_STRICT), "organizations", ORG_LEGACY_STRICT), {
+    verifiedAt: null,
+  }));
+
+  // 7) 最大式数負荷（写真6枚すべて新規正規Storage URL＋ロゴ＋証明画像＋全プロフィール項目同時新規変更）でも
+  //    Firestoreの1,000式評価上限に達せず確実に成功すること（users / organizations 両方）
+  const sixNewOrgPhotos = Array.from(
+    { length: 6 },
+    (_, i) =>
+      `https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/organizations%2F${ORG_LEGACY_STRICT}%2Fphotos%2Fmax_${i}.jpg?alt=media&token=${i}`,
+  );
+  const newOrgLogo =
+    `https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/organizations%2F${ORG_LEGACY_STRICT}%2Flogo%2Fmax_logo.jpg?alt=media&token=logo`;
+  const newOrgProof =
+    `https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/organizations%2F${ORG_LEGACY_STRICT}%2Fproof%2Fmax_proof.jpg?alt=media&token=proof`;
+
+  await assertSucceeds(updateDoc(doc(as(ORG_LEGACY_STRICT), "organizations", ORG_LEGACY_STRICT), {
+    id: ORG_LEGACY_STRICT,
+    name: "全項目同時変更テスト団体",
+    description: "新しい2000文字以内の紹介文です。",
+    categories: ["sports", "culture", "beginner", "enjoy"],
+    campus: "both",
+    logoEmoji: "🏆",
+    instagramUrl: "https://www.instagram.com/max_load_test_org/",
+    groupLineUrl: "https://line.me/ti/g2/max_load_openchat",
+    logoUrl: newOrgLogo,
+    proofImageUrl: newOrgProof,
+    photoUrls: sixNewOrgPhotos,
+  }));
+
+  const sixNewStudentPhotos = Array.from(
+    { length: 6 },
+    (_, i) =>
+      `https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/users%2F${STUDENT}%2Fphotos%2Fmax_${i}.jpg?alt=media&token=${i}`,
+  );
+  const twentyNewInterests = Array.from({ length: 20 }, (_, i) => `新規興味_${i + 1}`);
+  await assertSucceeds(updateDoc(doc(as(STUDENT), "users", STUDENT), {
+    name: "最大負荷テスト学生",
+    faculty: "グローバル地域文化学部",
+    grade: 4,
+    mainCampus: "both",
+    interests: twentyNewInterests,
+    iconUrl: VALID_STORAGE_USER_ICON,
+    photoUrls: sixNewStudentPhotos,
+  }));
+});
+
+
 

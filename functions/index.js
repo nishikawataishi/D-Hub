@@ -3,6 +3,7 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const {
     onDocumentCreated,
     onDocumentDeleted,
+    onDocumentWritten,
 } = require("firebase-functions/v2/firestore");
 const { defineSecret } = require("firebase-functions/params");
 const logger = require("firebase-functions/logger");
@@ -39,6 +40,14 @@ const RECENT_AUTH_WINDOW_SECONDS = 10 * 60;
 const EVENT_DELETE_CONCURRENCY = 20;
 const SELF_DELETE_MARKER_COLLECTION = "_account_deletions";
 const SELF_DELETE_MARKER_TTL_MS = 10 * 60 * 1000;
+
+// 運営通知メールのグローバル流量制限（学生認証コード用SMTPクォータを圧迫しないための上限）
+const ADMIN_ALERT_RATE_LIMIT_COLLECTION = "_admin_alert_rate_limits";
+const ADMIN_ALERT_RATE_LIMIT_DOC_ID = "global";
+const MAX_ADMIN_ALERT_EMAILS_PER_HOUR = 5;
+const MAX_ADMIN_ALERT_EMAILS_PER_DAY = 20;
+const ONE_HOUR_MS = 60 * 60 * 1000;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * SHA-256ハッシュを生成する
@@ -580,7 +589,8 @@ async function cleanupRelatedAccountData(uid, { cleanStudentData, cleanOrgData }
         }
     }
 
-    // 他人が対象UIDをブロックしている記録の削除（select() でドキュメント本体転送を抑止）
+    // 他人が対象UIDをブロックしている記録の削除
+    // ※select() でドキュメント本体の転送量は削減されるが、課金される読み取り回数は減らない点に留意（現規模では許容範囲）
     const allBlocks = await db.collectionGroup("blocks").select().get();
     allBlocks.docs
         .filter((d) => d.id === uid)
@@ -589,22 +599,41 @@ async function cleanupRelatedAccountData(uid, { cleanStudentData, cleanOrgData }
     await bulkWriter.close();
 
     // Storage 画像の一括削除（force: true および 404 無視で冪等性を担保）
+    // ※ADC 未設定のオフラインエミュレータ環境ではデフォルトバケットが <projectId>.appspot.com に
+    //   フォールバックするため、エミュレータ実行時は .firebasestorage.app バケットも併せて削除対象にする
     const prefixes = [];
     if (cleanStudentData) prefixes.push(`users/${uid}/`);
     if (cleanOrgData) prefixes.push(`organizations/${uid}/`);
 
-    const bucket = getStorage().bucket();
-    for (const prefix of prefixes) {
-        try {
-            await bucket.deleteFiles({ prefix, force: true });
-        } catch (error) {
-            const errors = Array.isArray(error) ? error : [error];
-            const nonNotFound = errors.filter(
-                (e) => e && e.code !== 404 && e.code !== "404",
-            );
-            if (nonNotFound.length > 0) {
-                failedDeletes++;
-                logger.error(`Storage delete failed: ${prefix}`, error);
+    const storage = getStorage();
+    const defaultBucket = storage.bucket();
+    const targetBuckets = [defaultBucket];
+    if (
+        process.env.FUNCTIONS_EMULATOR === "true" &&
+        process.env.GCLOUD_PROJECT &&
+        defaultBucket.name !== `${process.env.GCLOUD_PROJECT}.firebasestorage.app`
+    ) {
+        targetBuckets.push(
+            storage.bucket(`${process.env.GCLOUD_PROJECT}.firebasestorage.app`),
+        );
+    }
+
+    for (const bucket of targetBuckets) {
+        for (const prefix of prefixes) {
+            try {
+                await bucket.deleteFiles({ prefix, force: true });
+            } catch (error) {
+                const errors = Array.isArray(error) ? error : [error];
+                const nonNotFound = errors.filter(
+                    (e) => e && e.code !== 404 && e.code !== "404",
+                );
+                if (nonNotFound.length > 0) {
+                    failedDeletes++;
+                    logger.error(
+                        `Storage delete failed: bucket=${bucket.name} prefix=${prefix}`,
+                        error,
+                    );
+                }
             }
         }
     }
@@ -909,11 +938,39 @@ exports.onUserDeleted = onDocumentDeleted(
 );
 
 // ============================================================================
-// P3-4: 通報・新規団体登録の運営メール通知トリガー（「24時間以内確認」の運用担保）
+// P3-4: 通報・団体審査申請の運営メール通知トリガー（「24時間以内確認」の運用担保）
 // ============================================================================
 
 /**
- * 運営通知の重複送信を防ぎつつメール送信と監査ログ記録を行う共通ヘルパー
+ * 運営通知メール用の SMTP トランスポーターと送信元アドレスを取得する。
+ * 環境変数 ADMIN_SMTP_USER / ADMIN_SMTP_PASS が設定されている場合は学生認証コードとは別の専用送信元を使い、
+ * 未設定の場合は既存の SMTP_USER / SMTP_PASS にフォールバックする（いずれの場合もトランザクション流量制限を適用）。
+ * @return {{ transporter: import("nodemailer").Transporter, senderEmail: string }} 送信コンテキスト
+ */
+function createAdminAlertSmtpContext() {
+    const dedicatedUser = (process.env.ADMIN_SMTP_USER || "").trim();
+    const dedicatedPass = process.env.ADMIN_SMTP_PASS || "";
+    if (dedicatedUser && dedicatedPass) {
+        return {
+            senderEmail: dedicatedUser,
+            transporter: nodemailer.createTransport({
+                service: "gmail",
+                auth: {
+                    user: dedicatedUser,
+                    pass: dedicatedPass,
+                },
+            }),
+        };
+    }
+    return {
+        senderEmail: SMTP_USER.value(),
+        transporter: createSmtpTransporter(),
+    };
+}
+
+/**
+ * 運営通知の重複送信防止とグローバル件数制限（1時間最大5通・24時間最大20通）を
+ * 単一トランザクションで行い、学生認証コードのSMTP配信枠を保護しつつメール通知と監査記録を行う。
  * @param {object} params 通知パラメータ
  */
 async function sendAdminAlertOnce({
@@ -926,42 +983,164 @@ async function sendAdminAlertOnce({
     htmlBody,
 }) {
     const noteRef = db.collection("admin_notifications").doc(notificationId);
+    const rateLimitRef = db
+        .collection(ADMIN_ALERT_RATE_LIMIT_COLLECTION)
+        .doc(ADMIN_ALERT_RATE_LIMIT_DOC_ID);
+    const isEmulator = process.env.FUNCTIONS_EMULATOR === "true";
 
-    // At-least-once 配信での重複メール送信をトランザクションで防止
-    const shouldSend = await db.runTransaction(async (tx) => {
-        const existing = await tx.get(noteRef);
-        if (existing.exists) return false;
+    // At-least-once 配信での重複防止とグローバル送信件数制限を単一トランザクションでアトミックに判定
+    const decision = await db.runTransaction(async (tx) => {
+        const [existing, rateSnap] = await Promise.all([
+            tx.get(noteRef),
+            tx.get(rateLimitRef),
+        ]);
+        if (existing.exists) {
+            return { action: "duplicate" };
+        }
+
+        const nowMs = Date.now();
+        const rateData = rateSnap.exists ? rateSnap.data() || {} : {};
+
+        let hourWindowStartMs =
+            typeof rateData.hourWindowStartMs === "number"
+                ? rateData.hourWindowStartMs
+                : nowMs;
+        let hourSentCount =
+            typeof rateData.hourSentCount === "number"
+                ? rateData.hourSentCount
+                : 0;
+        if (nowMs - hourWindowStartMs >= ONE_HOUR_MS) {
+            hourWindowStartMs = nowMs;
+            hourSentCount = 0;
+        }
+
+        let dayWindowStartMs =
+            typeof rateData.dayWindowStartMs === "number"
+                ? rateData.dayWindowStartMs
+                : nowMs;
+        let daySentCount =
+            typeof rateData.daySentCount === "number"
+                ? rateData.daySentCount
+                : 0;
+        if (nowMs - dayWindowStartMs >= ONE_DAY_MS) {
+            dayWindowStartMs = nowMs;
+            daySentCount = 0;
+        }
+
+        const suppressedCount =
+            typeof rateData.suppressedSinceLastEmail === "number"
+                ? rateData.suppressedSinceLastEmail
+                : 0;
+
+        // 上限到達時は監査ドキュメントのみ記録し、SMTP送信をスキップして認証コード配信を保護する
+        if (
+            hourSentCount >= MAX_ADMIN_ALERT_EMAILS_PER_HOUR ||
+            daySentCount >= MAX_ADMIN_ALERT_EMAILS_PER_DAY
+        ) {
+            tx.set(noteRef, {
+                type,
+                targetId,
+                escapedTargetName,
+                subject,
+                status: "rate_limited",
+                rateLimitedAt: FieldValue.serverTimestamp(),
+                createdAt: FieldValue.serverTimestamp(),
+            });
+            tx.set(rateLimitRef, {
+                hourWindowStartMs,
+                hourSentCount,
+                dayWindowStartMs,
+                daySentCount,
+                suppressedSinceLastEmail: suppressedCount + 1,
+                updatedAt: FieldValue.serverTimestamp(),
+            });
+            return { action: "rate_limited" };
+        }
+
+        const nextHourCount = hourSentCount + 1;
+        const nextDayCount = daySentCount + 1;
+        const isReachingLimitNow =
+            nextHourCount >= MAX_ADMIN_ALERT_EMAILS_PER_HOUR ||
+            nextDayCount >= MAX_ADMIN_ALERT_EMAILS_PER_DAY;
+
         tx.set(noteRef, {
             type,
             targetId,
             escapedTargetName,
             subject,
-            status:
-                process.env.FUNCTIONS_EMULATOR === "true"
-                    ? "mock_emulator"
-                    : "sending",
+            status: isEmulator ? "mock_emulator" : "sending",
+            priorSuppressedCount: suppressedCount,
+            reachedRateLimit: isReachingLimitNow,
             createdAt: FieldValue.serverTimestamp(),
         });
-        return true;
+        tx.set(rateLimitRef, {
+            hourWindowStartMs,
+            hourSentCount: nextHourCount,
+            dayWindowStartMs,
+            daySentCount: nextDayCount,
+            suppressedSinceLastEmail: 0,
+            updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        return {
+            action: "send",
+            priorSuppressedCount: suppressedCount,
+            isReachingLimitNow,
+        };
     });
 
-    if (!shouldSend) return;
+    if (decision.action === "duplicate") return;
+    if (decision.action === "rate_limited") {
+        logger.warn(
+            `Admin alert email suppressed by rate limit: id=${notificationId} type=${type}`,
+        );
+        return;
+    }
 
-    if (process.env.FUNCTIONS_EMULATOR === "true") {
+    if (isEmulator) {
         logger.info(`[MOCK] Admin alert (${type}): ${subject}`);
         return;
     }
 
+    const extraTextNotes = [];
+    const extraHtmlNotes = [];
+    if (decision.priorSuppressedCount > 0) {
+        extraTextNotes.push(
+            `※直前の流量制限中に他 ${decision.priorSuppressedCount} 件の通知メールが省略されています。管理画面で未確認の項目をすべて確認してください。`,
+        );
+        extraHtmlNotes.push(
+            `<p style="padding: 10px; background: #fff8e1; border-left: 4px solid #f9a825; font-size: 13px;">※直前の流量制限中に他 <strong>${decision.priorSuppressedCount}件</strong> の通知メールが省略されています。管理画面で未確認の項目をすべて確認してください。</p>`,
+        );
+    }
+    if (decision.isReachingLimitNow) {
+        extraTextNotes.push(
+            `※短時間に通知が集中したため、認証コード配信保護のためこれ以降の通知メールを一時制限します（1時間最大${MAX_ADMIN_ALERT_EMAILS_PER_HOUR}通・24時間最大${MAX_ADMIN_ALERT_EMAILS_PER_DAY}通）。管理画面から全件確認してください。`,
+        );
+        extraHtmlNotes.push(
+            `<p style="padding: 10px; background: #ffebee; border-left: 4px solid #d32f2f; font-size: 13px;">※短時間に通知が集中したため、認証コード配信保護のためこれ以降の通知メールを一時制限します（1時間最大${MAX_ADMIN_ALERT_EMAILS_PER_HOUR}通・24時間最大${MAX_ADMIN_ALERT_EMAILS_PER_DAY}通）。管理画面から全件確認してください。</p>`,
+        );
+    }
+
+    const finalTextBody =
+        extraTextNotes.length > 0
+            ? `${textBody}\n\n${extraTextNotes.join("\n")}`
+            : textBody;
+    const finalHtmlBody =
+        extraHtmlNotes.length > 0
+            ? `${htmlBody}\n${extraHtmlNotes.join("\n")}`
+            : htmlBody;
+
+    const { transporter, senderEmail } = createAdminAlertSmtpContext();
     const adminRecipient =
-        process.env.ADMIN_NOTIFY_EMAIL || SMTP_USER.value();
-    const transporter = createSmtpTransporter();
+        (process.env.ADMIN_NOTIFY_EMAIL || "").trim() || senderEmail;
+
     try {
         await transporter.sendMail({
-            from: `"D-Hub 監視通知" <${SMTP_USER.value()}>`,
+            from: `"D-Hub 監視通知" <${senderEmail}>`,
             to: adminRecipient,
             subject,
-            text: textBody,
-            html: htmlBody,
+            text: finalTextBody,
+            html: finalHtmlBody,
         });
         await noteRef.update({
             status: "sent",
@@ -978,7 +1157,7 @@ async function sendAdminAlertOnce({
 }
 
 /**
- * 新規通報（reports/{reportId}）が作成された際に運営へ即座にメール通知する
+ * 新規通報（reports/{reportId}）が作成された際に運営へメール通知する（件数制限付き）
  */
 exports.onReportCreated = onDocumentCreated(
     {
@@ -1041,33 +1220,55 @@ exports.onReportCreated = onDocumentCreated(
 );
 
 /**
- * 新規団体アカウント（審査待ち）が登録された際に運営へメール通知する
+ * 団体アカウントの審査申請（proofImageUrl が初めて設定された update または直接 create）が行われた際に運営へメール通知する。
+ * サインアップ時の仮ドキュメント（name: '団体名未設定', proofImageUrl 未設定）では通知しない。
  */
-exports.onOrganizationCreated = onDocumentCreated(
+exports.onOrganizationApplicationSubmitted = onDocumentWritten(
     {
         document: "organizations/{orgId}",
         secrets: [SMTP_USER, SMTP_PASS],
         maxInstances: 5,
     },
     async (event) => {
-        const data = event.data?.data();
-        if (!data || data.isReviewSeed === true || data.status !== "pending") {
+        const beforeData = event.data?.before?.data();
+        const afterData = event.data?.after?.data();
+
+        if (
+            !afterData ||
+            afterData.isReviewSeed === true ||
+            afterData.status !== "pending"
+        ) {
+            return;
+        }
+
+        const beforeProofUrl =
+            typeof beforeData?.proofImageUrl === "string"
+                ? beforeData.proofImageUrl.trim()
+                : "";
+        const afterProofUrl =
+            typeof afterData.proofImageUrl === "string"
+                ? afterData.proofImageUrl.trim()
+                : "";
+
+        // proofImageUrl が未設定（空）から初めて設定された書き込みのみを通知契機とする
+        if (beforeProofUrl.length > 0 || afterProofUrl.length === 0) {
             return;
         }
 
         const { orgId } = event.params;
-        const cleanOrgName = sanitizeSingleLine(data.name || "団体名未設定");
-        const cleanCampus = sanitizeSingleLine(data.campus || "未設定");
-        const cleanInstagram = sanitizeSingleLine(data.instagramUrl || "（未入力）");
+        const cleanOrgName = sanitizeSingleLine(afterData.name || "団体名未設定");
+        const cleanCampus = sanitizeSingleLine(afterData.campus || "未設定");
+        const cleanInstagram = sanitizeSingleLine(
+            afterData.instagramUrl || "（未入力）",
+        );
         const safeOrgName = escapeHtml(cleanOrgName || "団体名未設定");
         const safeCampus = escapeHtml(cleanCampus || "未設定");
         const safeInstagram = escapeHtml(cleanInstagram || "（未入力）");
 
-        const subject = `【D-Hub 審査依頼】新規団体アカウントが登録されました（${cleanOrgName || "団体名未設定"}）`;
+        const subject = `【D-Hub 審査依頼】団体作成の申請が提出されました（${cleanOrgName || "団体名未設定"}）`;
         const textBody = [
-            "D-Hub に新しい団体アカウントが登録されました（ステータス: pending）。",
-            "管理画面の「団体管理」タブから内容を確認し、承認・却下の審査を行ってください。",
-            "※アカウント登録直後は『団体名未設定』の状態のため、団体側のプロフィール入力状況もあわせてご確認ください。",
+            "D-Hub で団体アカウントの活動証明画像が提出されました（ステータス: pending）。",
+            "管理画面の「団体管理」タブから証明画像・活動内容を確認し、24時間以内に承認・却下の審査を行ってください。",
             "",
             `団体UID: ${orgId}`,
             `団体名: ${cleanOrgName || "団体名未設定"}`,
@@ -1077,9 +1278,8 @@ exports.onOrganizationCreated = onDocumentCreated(
 
         const htmlBody = `
         <div style="font-family: sans-serif; color: #333;">
-            <h2>【D-Hub】新規団体登録のお知らせ</h2>
-            <p>審査待ちの団体アカウントが作成されました。管理画面から実在確認・審査を行ってください。</p>
-            <p style="color: #666; font-size: 12px;">※アカウント登録直後は初期値（団体名未設定）のため、団体側のプロフィール編集完了後に承認審査を行ってください。</p>
+            <h2>【D-Hub】団体審査申請のお知らせ</h2>
+            <p>活動証明画像付きの団体申請が提出されました。管理画面から実在確認・審査を行ってください。</p>
             <ul>
                 <li><strong>団体UID:</strong> <code>${escapeHtml(orgId)}</code></li>
                 <li><strong>団体名:</strong> ${safeOrgName}</li>

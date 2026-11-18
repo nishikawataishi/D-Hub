@@ -474,10 +474,13 @@ test("[P3-3] setAdminClaim は既存カスタムクレームを保持し、remov
 // 【P3-4】新規通報・新規団体申請の運営通知トリガー（24時間以内確認の担保）
 // ============================================================================
 
-test("[P3-4] 新規通報・新規団体申請の作成時に運営通知トリガーが動作し、シードデータはスキップする", async () => {
+test("[P3-4] 新規通報および団体証明画像の初回提出（update / 直接create）で運営通知が記録され、仮ドキュメントやシードデータでは発火しない", async () => {
+  await adminDb.collection("_admin_alert_rate_limits").doc("global").delete();
+
   const reportId = "p34_live_report";
   const seedReportId = "p34_seed_report";
   const orgId = "p34_live_pending_org";
+  const directCreateOrgId = "p34_direct_create_org";
 
   await adminDb.collection("reports").doc(reportId).set({
     reporterId: "st_1",
@@ -504,19 +507,78 @@ test("[P3-4] 新規通報・新規団体申請の作成時に運営通知トリ�
     createdAt: new Date(),
   });
 
+  // 1) サインアップ直後の仮ドキュメント（name: '団体名未設定', proofImageUrl なし）を作成
   await adminDb.collection("organizations").doc(orgId).set({
-    name: "新規申請テニス部",
+    name: "団体名未設定",
+    description: "",
+    categories: ["culture"],
+    campus: "both",
+    logoEmoji: "🎨",
+    instagramUrl: "",
+    groupLineUrl: "",
+    isOfficial: false,
+    photoUrls: [],
     status: "pending",
     representativeId: orgId,
     createdAt: new Date(),
   });
 
-  const notified = await waitForCondition(async () => {
+  // 通報の通知が完了するまで待機（この時点で同一バッチのトリガー群は処理済み）
+  const reportNotified = await waitForCondition(async () => {
     const rNote = await adminDb.collection("admin_notifications").doc(`report_${reportId}`).get();
-    const oNote = await adminDb.collection("admin_notifications").doc(`org_${orgId}`).get();
-    return rNote.exists && oNote.exists;
+    return rNote.exists;
   });
-  assert.equal(notified, true, "通報または新規団体申請の運営通知トリガーが記録を作成していません");
+  assert.equal(reportNotified, true, "新規通報の運営通知トリガーが記録を作成していません");
+
+  // 少し待っても仮ドキュメント作成では org_${orgId} の通知が作られていないことを確認
+  await new Promise((r) => setTimeout(r, 800));
+  const prematureOrgNote = await adminDb.collection("admin_notifications").doc(`org_${orgId}`).get();
+  assert.equal(
+    prematureOrgNote.exists,
+    false,
+    "サインアップ時の仮ドキュメント（proofImageUrl未設定）で運営通知が誤発火しています",
+  );
+
+  // 2) OrgCreateScreen と同じく proofImageUrl を初めて設定する update を実行 → ここで初めて通知されること
+  const proofUrl =
+    `https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/organizations%2F${orgId}%2Fphotos%2Fproof.jpg?alt=media&token=123`;
+  await adminDb.collection("organizations").doc(orgId).set(
+    {
+      name: "新規申請テニス部",
+      description: "審査後にプロフィールを編集できます。",
+      categories: ["sports"],
+      campus: "both",
+      instagramUrl: "https://www.instagram.com/doshisha_tennis/",
+      proofImageUrl: proofUrl,
+      status: "pending",
+      representativeId: orgId,
+    },
+    { merge: true },
+  );
+
+  // 3) 未登録状態から proofImageUrl 付きで直接 create されたケースも通知されること
+  const directProofUrl =
+    `https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/organizations%2F${directCreateOrgId}%2Fphotos%2Fproof.jpg?alt=media&token=456`;
+  await adminDb.collection("organizations").doc(directCreateOrgId).set({
+    name: "直接申請軽音サークル",
+    status: "pending",
+    representativeId: directCreateOrgId,
+    proofImageUrl: directProofUrl,
+    createdAt: new Date(),
+  });
+
+  const orgNotified = await waitForCondition(async () => {
+    const oNote = await adminDb.collection("admin_notifications").doc(`org_${orgId}`).get();
+    const dNote = await adminDb.collection("admin_notifications").doc(`org_${directCreateOrgId}`).get();
+    return oNote.exists && dNote.exists;
+  });
+  assert.equal(orgNotified, true, "proofImageUrl 提出時の団体申請通知トリガーが記録を作成していません");
+
+  const orgNotification = (await adminDb.collection("admin_notifications").doc(`org_${orgId}`).get()).data();
+  assert.ok(
+    orgNotification.subject.includes("新規申請テニス部"),
+    `通知件名に申請時の団体名が反映されていません: ${orgNotification.subject}`,
+  );
 
   // HTMLエスケープの確認（管理者のメーラーでのHTMLインジェクション防止）
   const reportNotification = (await adminDb.collection("admin_notifications").doc(`report_${reportId}`).get()).data();
@@ -525,6 +587,229 @@ test("[P3-4] 新規通報・新規団体申請の作成時に運営通知トリ�
   // isReviewSeed: true のデータは通知対象外であること
   const seedNote = await adminDb.collection("admin_notifications").doc(`report_${seedReportId}`).get();
   assert.equal(seedNote.exists, false);
+
+  // エッジケース: 空白のみの proofImageUrl や status: 'verified' 団体への設定では発火しないこと
+  const blankProofOrgId = "p34_blank_proof_org";
+  const verifiedOrgId = "p34_already_verified_org";
+  await adminDb.collection("organizations").doc(blankProofOrgId).set({
+    name: "空白証明URLテスト",
+    status: "pending",
+    representativeId: blankProofOrgId,
+    proofImageUrl: "   ",
+    createdAt: new Date(),
+  });
+  await adminDb.collection("organizations").doc(verifiedOrgId).set({
+    name: "承認済み証明URLテスト",
+    status: "verified",
+    representativeId: verifiedOrgId,
+    proofImageUrl: directProofUrl,
+    createdAt: new Date(),
+  });
+  await new Promise((r) => setTimeout(r, 800));
+  const blankNote = await adminDb.collection("admin_notifications").doc(`org_${blankProofOrgId}`).get();
+  const verifiedNote = await adminDb.collection("admin_notifications").doc(`org_${verifiedOrgId}`).get();
+  assert.equal(blankNote.exists, false, "空白のみの proofImageUrl で通知が誤発火しています");
+  assert.equal(verifiedNote.exists, false, "status=verified の団体で審査通知が誤発火しています");
+});
+
+test("[必須2・流量制限] 運営通知メールが短時間に大量発生しても1時間あたりの上限件数で制限され、学生認証コード配信を阻害しない", async () => {
+  await adminDb.collection("_admin_alert_rate_limits").doc("global").delete();
+
+  const totalBurstReports = 8;
+  const reportIds = Array.from({ length: totalBurstReports }, (_, i) => `p34_burst_report_${i}`);
+
+  // 8件の通報を同時に投入（並列バースト）
+  await Promise.all(
+    reportIds.map((id, i) =>
+      adminDb.collection("reports").doc(id).set({
+        reporterId: `st_burst_${i}`,
+        reporterRole: "student",
+        targetType: "organization",
+        targetId: "org_target",
+        targetName: `通報対象_${i}`,
+        reason: "spam",
+        detail: "大量通報バーストテスト",
+        status: "open",
+        createdAt: new Date(),
+      }),
+    ),
+  );
+
+  const allRecorded = await waitForCondition(async () => {
+    const snaps = await Promise.all(
+      reportIds.map((id) => adminDb.collection("admin_notifications").doc(`report_${id}`).get()),
+    );
+    return snaps.every((s) => s.exists);
+  }, 12000);
+  assert.equal(allRecorded, true, "バースト通報の監査ドキュメントが全件記録されませんでした");
+
+  const snaps = await Promise.all(
+    reportIds.map((id) => adminDb.collection("admin_notifications").doc(`report_${id}`).get()),
+  );
+  const statuses = snaps.map((s) => s.data().status);
+  const sentCount = statuses.filter((s) => s === "mock_emulator" || s === "sent").length;
+  const rateLimitedCount = statuses.filter((s) => s === "rate_limited").length;
+
+  assert.equal(
+    sentCount,
+    5,
+    `1時間上限5通に対して ${sentCount} 通が送信対象になりました（statuses=${JSON.stringify(statuses)}）`,
+  );
+  assert.equal(
+    rateLimitedCount,
+    3,
+    `残り3件が rate_limited になっていません（statuses=${JSON.stringify(statuses)}）`,
+  );
+
+  // 通知メールの流量制限発動中でも、学生の認証コード送信（sendVerificationCode）は問題なく成功すること
+  const studentUid = "p34_verify_unaffected_student";
+  const studentEmail = "unaffected@mail2.doshisha.ac.jp";
+  await adminDb.collection("users").doc(studentUid).set({
+    isStudentVerified: false,
+    createdAt: new Date(),
+  });
+  await loginTestUser(studentUid, studentEmail);
+  const sendRes = await httpsCallable(clientFunctions, "sendVerificationCode")({ email: studentEmail });
+  assert.equal(sendRes.data.success, true);
+
+  // 1時間ウィンドウ経過後（hourWindowStartMs を61分前に巻き戻し）は送信が再開され、省略件数が記録されること
+  await adminDb.collection("_admin_alert_rate_limits").doc("global").update({
+    hourWindowStartMs: Date.now() - 61 * 60 * 1000,
+  });
+  const recoveryReportId = "p34_recovery_report";
+  await adminDb.collection("reports").doc(recoveryReportId).set({
+    reporterId: "st_recovery",
+    reporterRole: "student",
+    targetType: "organization",
+    targetId: "org_target",
+    targetName: "ウィンドウ回復後通報",
+    reason: "other",
+    detail: "回復確認",
+    status: "open",
+    createdAt: new Date(),
+  });
+
+  const recoveryRecorded = await waitForCondition(async () => {
+    const docSnap = await adminDb.collection("admin_notifications").doc(`report_${recoveryReportId}`).get();
+    return docSnap.exists;
+  });
+  assert.equal(recoveryRecorded, true);
+  const recoveryData = (await adminDb.collection("admin_notifications").doc(`report_${recoveryReportId}`).get()).data();
+  assert.equal(recoveryData.status, "mock_emulator");
+  assert.equal(recoveryData.priorSuppressedCount, 3, "流量制限中に省略された件数が引き継がれていません");
+});
+
+test("[必須2・本番SMTP経路] 専用SMTPアカウント優先切替・フォールバック・省略件数サマリー本文付与・送信失敗時記録が動作する", async () => {
+  await adminDb.collection("_admin_alert_rate_limits").doc("global").set({
+    hourWindowStartMs: Date.now(),
+    hourSentCount: 4, // 次の1通（5通目）でちょうど上限到達する状態
+    dayWindowStartMs: Date.now(),
+    daySentCount: 4,
+    suppressedSinceLastEmail: 2, // 前回2件省略されていた状態
+  });
+
+  const { execFileSync } = await import("node:child_process");
+  const script = `
+    process.env.FIRESTORE_EMULATOR_HOST = ${JSON.stringify(process.env.FIRESTORE_EMULATOR_HOST)};
+    process.env.GCLOUD_PROJECT = ${JSON.stringify(PROJECT_ID)};
+    process.env.FUNCTIONS_EMULATOR = "false";
+    process.env.SMTP_USER = "student-auth@example.com";
+    process.env.SMTP_PASS = "student-pass";
+    process.env.ADMIN_SMTP_USER = "admin-dedicated@example.com";
+    process.env.ADMIN_SMTP_PASS = "admin-dedicated-pass";
+    process.env.ADMIN_NOTIFY_EMAIL = "ops-inbox@example.com";
+
+    const nodemailer = require("nodemailer");
+    const transportConfigs = [];
+    const sentMessages = [];
+    let shouldFailSend = false;
+
+    nodemailer.createTransport = (cfg) => {
+      transportConfigs.push(cfg);
+      return {
+        sendMail: async (mail) => {
+          if (shouldFailSend) throw new Error("Simulated SMTP 421 quota error");
+          sentMessages.push(mail);
+          return { messageId: "mock-msg-id" };
+        },
+      };
+    };
+
+    const fn = require("./index.js");
+
+    (async () => {
+      // 1) 専用SMTP設定あり＋省略件数あり＋上限到達5通目の本番送信パス
+      await fn.onReportCreated.run({
+        params: { reportId: "prod_smtp_ok_1" },
+        data: {
+          data: () => ({
+            reporterId: "st_1",
+            reporterRole: "student",
+            targetType: "organization",
+            targetId: "org_1",
+            targetName: "本番経路テスト団体",
+            reason: "spam",
+            detail: "本番SMTPコードパス検証",
+            status: "open",
+          }),
+        },
+      });
+
+      // 2) 専用SMTP未設定時のフォールバック＋SMTP送信エラー時の failed 記録検証
+      delete process.env.ADMIN_SMTP_USER;
+      delete process.env.ADMIN_SMTP_PASS;
+      const admin = require("firebase-admin");
+      await admin.firestore().collection("_admin_alert_rate_limits").doc("global").delete();
+      shouldFailSend = true;
+
+      await fn.onOrganizationApplicationSubmitted.run({
+        params: { orgId: "prod_smtp_fail_org" },
+        data: {
+          before: { data: () => ({ name: "団体名未設定", status: "pending" }) },
+          after: {
+            data: () => ({
+              name: "エラー検証サークル",
+              campus: "imadegawa",
+              instagramUrl: "@test_circle",
+              proofImageUrl: "https://firebasestorage.googleapis.com/v0/b/d-scout-6d281.firebasestorage.app/o/organizations%2Fprod_smtp_fail_org%2Fphotos%2Fproof.jpg",
+              status: "pending",
+            }),
+          },
+        },
+      });
+
+      console.log("__RESULT__" + JSON.stringify({ transportConfigs, sentMessages }));
+    })().catch((e) => {
+      console.error(e);
+      process.exit(1);
+    });
+  `;
+
+  const raw = execFileSync(process.execPath, ["-e", script], {
+    cwd: new URL("../functions", import.meta.url),
+    encoding: "utf8",
+  });
+  const resultLine = raw.split("\n").find((l) => l.startsWith("__RESULT__"));
+  assert.ok(resultLine, `結果出力が見つかりません: ${raw}`);
+  const { transportConfigs, sentMessages } = JSON.parse(resultLine.slice("__RESULT__".length));
+
+  // 1通目は専用SMTP（admin-dedicated@example.com）が使われていること
+  assert.equal(transportConfigs[0].auth.user, "admin-dedicated@example.com");
+  assert.equal(sentMessages.length, 1);
+  assert.ok(sentMessages[0].from.includes("admin-dedicated@example.com"));
+  assert.equal(sentMessages[0].to, "ops-inbox@example.com");
+  assert.ok(sentMessages[0].text.includes("2 件の通知メールが省略されています"));
+  assert.ok(sentMessages[0].text.includes("これ以降の通知メールを一時制限します"));
+
+  // Firestore 上で 1通目は sent、2通目（フォールバック＋エラー）は student-auth@example.com を使い failed として記録されていること
+  assert.equal(transportConfigs[1].auth.user, "student-auth@example.com");
+  const okSnap = await adminDb.collection("admin_notifications").doc("report_prod_smtp_ok_1").get();
+  assert.equal(okSnap.data().status, "sent");
+  assert.ok(okSnap.data().sentAt != null);
+
+  const failSnap = await adminDb.collection("admin_notifications").doc("org_prod_smtp_fail_org").get();
+  assert.equal(failSnap.data().status, "failed");
+  assert.ok(failSnap.data().errorMessage.includes("Simulated SMTP 421 quota error"));
 });
 
 // ============================================================================
