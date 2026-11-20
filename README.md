@@ -14,7 +14,37 @@
 
 > 代表の西川大司が企画・要件定義・設計・技術選定・セキュリティ設計を担当し、実装には AI コーディングエージェント（Claude Code）を活用しています。2026年10月からは運営メンバー4名（PM・広報・団体パートナー）が加わっています。
 
-<!-- TODO: スクリーンショットを3枚ほど（ホーム / スカウト / イベント） -->
+---
+
+## 画面イメージ
+
+| ホーム（団体一覧） | スカウト受信 | イベント一覧 |
+| :---: | :---: | :---: |
+| <img src="docs/store/screenshots/02_home.png" width="240" alt="ホーム画面" /> | <img src="docs/store/screenshots/01_scout.png" width="240" alt="スカウト画面" /> | <img src="docs/store/screenshots/04_event.png" width="240" alt="イベント画面" /> |
+
+<details>
+<summary>その他の画面を見る（ログイン / 団体詳細 / マイページ / モデレーション）</summary>
+
+| ログイン | 団体詳細 | マイページ | 通報・ブロック |
+| :---: | :---: | :---: | :---: |
+| <img src="docs/store/screenshots/00_login.png" width="180" alt="ログイン画面" /> | <img src="docs/store/screenshots/03_org_detail.png" width="180" alt="団体詳細画面" /> | <img src="docs/store/screenshots/05_mypage.png" width="180" alt="マイページ" /> | <img src="docs/store/screenshots/06_moderation.png" width="180" alt="モデレーション画面" /> |
+
+</details>
+
+---
+
+## 目次
+
+- [解決する課題](#解決する課題)
+- [主な機能](#主な機能)
+- [技術スタック](#技術スタック)
+- [アーキテクチャ](#アーキテクチャ)
+- [セキュリティ設計](#セキュリティ設計)
+- [品質保証 / CI](#品質保証--ci)
+- [セットアップ](#セットアップ)
+- [プロジェクト構成](#プロジェクト構成)
+- [ドキュメント](#ドキュメント)
+- [ライセンス](#ライセンス)
 
 ---
 
@@ -300,6 +330,25 @@ docs/
   └── store/        App Store 掲載情報・リリース手順書
 lp/                 サービス紹介ページ
 ```
+
+---
+
+## ドキュメント
+
+設計や運用に関するドキュメントは [`docs/`](docs/) 配下にまとめています。
+
+| カテゴリ | ドキュメント | 内容 |
+| :--- | :--- | :--- |
+| **設計書** | [`docs/spec/01_requirements_definition.md`](docs/spec/01_requirements_definition.md) | 要件定義書 |
+| | [`docs/spec/02_basic_design.md`](docs/spec/02_basic_design.md) | 基本設計書 |
+| | [`docs/spec/03_detailed_design.md`](docs/spec/03_detailed_design.md) | 詳細設計書 |
+| | [`docs/spec/04_test_plan.md`](docs/spec/04_test_plan.md) | テスト計画書 |
+| **プロジェクト管理** | [`docs/pm/01_project_charter.md`](docs/pm/01_project_charter.md) | プロジェクト憲章 |
+| | [`docs/pm/02_stakeholder_register.md`](docs/pm/02_stakeholder_register.md) | ステークホルダー登録簿 |
+| | [`docs/pm/03_project_management_plan.md`](docs/pm/03_project_management_plan.md) | プロジェクトマネジメント計画書 |
+| **ストア公開** | [`docs/store/01_app_store_listing.md`](docs/store/01_app_store_listing.md) | App Store 掲載情報 |
+| | [`docs/store/02_screenshot_guide.md`](docs/store/02_screenshot_guide.md) | スクリーンショット撮影手順 |
+| | [`docs/store/03_ios_release_runbook.md`](docs/store/03_ios_release_runbook.md) | iOS リリース手順書 |
 
 ---
 
